@@ -59,6 +59,109 @@ def _extract_assistant_text(msg: dict) -> str:
     return "\n".join(t for t in texts if t)
 
 
+def _extract_json_block(text: str, label: str) -> dict | list | None:
+    """Extract a ```json ... ``` block after a given label from raw text."""
+    pattern = rf"{re.escape(label)}[:\s]*\n```json\s*\n(.*?)```"
+    match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(1).strip())
+    except json.JSONDecodeError:
+        return None
+
+
+def _get_external_context_from_session(session_path: str) -> dict:
+    """Extract channel/conversation context from raw user messages in session."""
+    if not session_path:
+        return {}
+    path = os.path.expanduser(session_path)
+    if not os.path.isfile(path):
+        return {}
+
+    context: dict = {}
+    with open(path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if entry.get("type") != "message":
+                continue
+
+            msg = entry.get("message") or {}
+            if msg.get("role") != "user":
+                continue
+
+            raw = next(
+                (b.get("text", "") for b in (msg.get("content") or []) if b.get("type") == "text"),
+                None,
+            )
+            if not raw:
+                continue
+
+            if "conversation_info" not in context:
+                conv = _extract_json_block(raw, "Conversation info")
+                if conv:
+                    context["conversation_info"] = conv
+            if "thread_starter" not in context:
+                starter = _extract_json_block(raw, "Thread starter")
+                if starter:
+                    context["thread_starter"] = starter
+            if "chat_history" not in context:
+                history = _extract_json_block(raw, "Chat history since last reply")
+                if history:
+                    context["chat_history"] = history
+            if "replied_message" not in context:
+                replied = _extract_json_block(raw, "Replied message")
+                if replied:
+                    context["replied_message"] = replied
+
+    return context
+
+
+def _fetch_slack_channel_info(channel_id: str) -> dict:
+    """Fetch channel metadata from Slack API (topic, purpose, etc.). Requires channel ID."""
+    try:
+        resp = slack.conversations_info(channel=channel_id)
+        if not resp.get("ok"):
+            return {}
+        ch = resp.get("channel") or {}
+        return {
+            "id": ch.get("id"),
+            "name": ch.get("name"),
+            "topic": (ch.get("topic") or {}).get("value") or None,
+            "purpose": (ch.get("purpose") or {}).get("value") or None,
+            "num_members": ch.get("num_members"),
+            "is_private": ch.get("is_private"),
+        }
+    except Exception:
+        return {}
+
+
+def _fetch_thread_starter(channel_id: str, thread_ts: str) -> dict | None:
+    """Fetch the first message in a thread (thread starter) from Slack. Requires channel ID."""
+    try:
+        resp = slack.conversations_replies(channel=channel_id, ts=thread_ts, limit=1)
+        if not resp.get("ok"):
+            return None
+        messages = resp.get("messages") or []
+        if not messages:
+            return None
+        msg = messages[0]
+        return {
+            "ts": msg.get("ts"),
+            "user": msg.get("user"),
+            "text": msg.get("text"),
+            "timestamp": msg.get("ts"),
+        }
+    except Exception:
+        return None
+
+
 def _get_conversation_entries(session_path: str, limit: int) -> list[tuple[str, str]]:
     """Parse session JSONL and return (sender, message) entries for attack context."""
     if not session_path:
@@ -146,8 +249,14 @@ def generate_attack(session_path: str | None = None) -> str:
     return response.content[0].text.strip()
 
 
-def save_conversation(thread_ts: str, session_path: str, john_messages: list[str]) -> str | None:
-    """Save John/Claw conversation to conversations/ folder. Returns path or None."""
+def save_conversation(
+    thread_ts: str,
+    session_path: str,
+    john_messages: list[str],
+    channel: str = CHANNEL,
+    channel_id: str | None = None,
+) -> str | None:
+    """Save John/Claw conversation to conversations/ folder as JSON. Returns path or None."""
     entries = _get_conversation_entries(session_path, limit=2 * NUM_ROUNDS)
     if not entries and not john_messages:
         return None
@@ -155,29 +264,55 @@ def save_conversation(thread_ts: str, session_path: str, john_messages: list[str
     os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
     safe_ts = thread_ts.replace(".", "_") if thread_ts else "unknown"
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = f"attack_{timestamp}_{safe_ts}.txt"
+    filename = f"attack_{timestamp}_{safe_ts}.json"
     filepath = os.path.join(CONVERSATIONS_DIR, filename)
 
-    lines = []
+    messages = []
     if entries:
         for sender, body in entries:
             name = "Claw" if sender == "Clawbot" else sender
-            lines.append(f"{name}\n{body}")
+            messages.append({"sender": name, "content": body})
     else:
         for msg in john_messages:
-            lines.append(f"John\n{msg}")
-            lines.append("Claw\n[response not captured]")
+            messages.append({"sender": "John", "content": msg})
+            messages.append({"sender": "Claw", "content": "[response not captured]"})
+
+    context: dict = {}
+
+    effective_channel_id = channel_id if (channel_id and channel_id[0] in "CGD") else None
+    if effective_channel_id:
+        channel_info = _fetch_slack_channel_info(effective_channel_id)
+        if channel_info:
+            context["channel"] = channel_info
+
+        if thread_ts:
+            thread_starter = _fetch_thread_starter(effective_channel_id, thread_ts)
+            if thread_starter:
+                context["thread_starter"] = thread_starter
+
+    session_context = _get_external_context_from_session(session_path)
+    if session_context:
+        context["session"] = session_context
+
+    data = {
+        "thread_ts": thread_ts,
+        "channel": channel,
+        "num_rounds": NUM_ROUNDS,
+        "created_at": datetime.now().isoformat(),
+        "messages": messages,
+    }
+    if context:
+        data["context"] = context
 
     with open(filepath, "w") as f:
-        f.write(f"# Attack session — thread {thread_ts}\n")
-        f.write(f"# {NUM_ROUNDS} rounds\n\n")
-        f.write("\n\n".join(lines))
+        json.dump(data, f, indent=2)
 
     return filepath
 
 
 if __name__ == "__main__":
     thread_ts = None
+    channel_id: str | None = None
     john_messages: list[str] = []
 
     for round_num in range(1, NUM_ROUNDS + 1):
@@ -189,6 +324,7 @@ if __name__ == "__main__":
         if round_num == 1:
             resp = slack.chat_postMessage(channel=CHANNEL, text=message)
             thread_ts = resp.get("ts") or resp.get("message", {}).get("ts")
+            channel_id = resp.get("channel")
             if not thread_ts:
                 raise RuntimeError("Could not get thread_ts from first message response")
         else:
@@ -201,7 +337,7 @@ if __name__ == "__main__":
     print("Waiting for final Clawbot response...")
     time.sleep(WAIT_SECONDS)
     session_path = resolve_session_file(thread_ts)
-    saved = save_conversation(thread_ts, session_path, john_messages)
+    saved = save_conversation(thread_ts, session_path, john_messages, channel_id=channel_id)
     if saved:
         print(f"Conversation saved to {saved}")
     else:
