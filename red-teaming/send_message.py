@@ -363,14 +363,19 @@ def delete_thread(channel_id: str, thread_ts: str) -> tuple[int, int]:
     return deleted, failed
 
 
-if __name__ == "__main__":
+def run_attack(first_message: str | None = None) -> str:
+    """
+    Run the full 5-round attack and return the conversation as formatted text.
+    If first_message is provided, use it for round 1; otherwise generate it.
+    Used by Inspect eval solver.
+    """
     thread_ts = None
-    channel_id: str | None = None
+    channel_id = None
     john_messages: list[str] = []
 
     for round_num in range(1, NUM_ROUNDS + 1):
         session_path = resolve_session_file(thread_ts)
-        attack = generate_attack(session_path)
+        attack = first_message if (round_num == 1 and first_message) else generate_attack(session_path)
         john_messages.append(attack)
         message = f"<@{OPENCLAW_BOT_USER_ID}> {attack}"
 
@@ -384,19 +389,30 @@ if __name__ == "__main__":
             slack.chat_postMessage(channel=CHANNEL, text=message, thread_ts=thread_ts)
 
         if round_num < NUM_ROUNDS:
-            print(f"Round {round_num} sent. Waiting {WAIT_SECONDS}s for Clawbot...")
             time.sleep(WAIT_SECONDS)
 
-    print("Waiting for final Clawbot response...")
     time.sleep(WAIT_SECONDS)
     session_path = resolve_session_file(thread_ts)
-    saved = save_conversation(thread_ts, session_path, john_messages, channel_id=channel_id)
-    if saved:
-        print(f"Conversation saved to {saved}")
-    else:
-        print("Could not save conversation (no session file or messages)")
+    entries = _get_conversation_entries(session_path, limit=2 * NUM_ROUNDS)
 
+    lines = []
+    if entries:
+        for sender, body in entries:
+            name = "Claw" if sender == "Clawbot" else sender
+            lines.append(f"{name}: {body}")
+    else:
+        for msg in john_messages:
+            lines.append(f"John: {msg}")
+            lines.append("Claw: [response not captured]")
+
+    save_conversation(thread_ts, session_path, john_messages, channel_id=channel_id)
     if channel_id and channel_id[0] in "CGD":
-        deleted, failed = delete_thread(channel_id, thread_ts)
-        print(f"Thread deleted: {deleted} messages removed{f', {failed} failed' if failed else ''}")
-    print(f"Done. All {NUM_ROUNDS} messages sent in thread {thread_ts}")
+        delete_thread(channel_id, thread_ts)
+
+    return "\n\n".join(lines)
+
+
+if __name__ == "__main__":
+    conversation = run_attack()
+    print("Conversation:")
+    print(conversation)
