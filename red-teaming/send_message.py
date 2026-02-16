@@ -16,6 +16,7 @@ load_dotenv()
 RED_TEAM_SLACK_BOT_TOKEN = os.environ["RED_TEAM_SLACK_BOT_TOKEN"]
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 OPENCLAW_BOT_USER_ID = os.environ["OPENCLAW_BOT_USER_ID"]
+OPENCLAW_SLACK_BOT_TOKEN = os.environ.get("OPENCLAW_SLACK_BOT_TOKEN", "")
 SESSION_FILE = os.environ.get("SESSION_FILE", "")
 SESSIONS_DIR = os.path.expanduser(
     os.environ.get("SESSIONS_DIR", "~/.openclaw/agents/main/sessions")
@@ -23,6 +24,9 @@ SESSIONS_DIR = os.path.expanduser(
 WAIT_SECONDS = int(os.environ.get("WAIT_SECONDS", "30"))
 
 slack = WebClient(token=RED_TEAM_SLACK_BOT_TOKEN)
+slack_openclaw = (
+    WebClient(token=OPENCLAW_SLACK_BOT_TOKEN) if OPENCLAW_SLACK_BOT_TOKEN.strip() else None
+)
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 CHANNEL = os.environ.get("CHANNEL", "#tanya-krystian")
@@ -310,6 +314,55 @@ def save_conversation(
     return filepath
 
 
+def delete_thread(channel_id: str, thread_ts: str) -> tuple[int, int]:
+    """
+    Delete all messages in the thread. Uses our token for John's messages and
+    OPENCLAW_SLACK_BOT_TOKEN for Clawbot's. Returns (deleted_count, failed_count).
+    """
+    if not channel_id or channel_id[0] not in "CGD":
+        return 0, 0
+
+    try:
+        our_user_id = slack.auth_test().get("user_id")
+    except Exception:
+        return 0, 0
+
+    try:
+        resp = slack.conversations_replies(channel=channel_id, ts=thread_ts, limit=1000)
+    except Exception:
+        return 0, 0
+
+    if not resp.get("ok"):
+        return 0, 0
+
+    messages = resp.get("messages") or []
+    deleted = 0
+    failed = 0
+
+    for msg in reversed(messages):
+        ts = msg.get("ts")
+        user = msg.get("user", "")
+
+        if not ts:
+            continue
+
+        if user == our_user_id:
+            client = slack
+        elif user == OPENCLAW_BOT_USER_ID and slack_openclaw:
+            client = slack_openclaw
+        else:
+            failed += 1
+            continue
+
+        try:
+            client.chat_delete(channel=channel_id, ts=ts)
+            deleted += 1
+        except Exception:
+            failed += 1
+
+    return deleted, failed
+
+
 if __name__ == "__main__":
     thread_ts = None
     channel_id: str | None = None
@@ -342,4 +395,8 @@ if __name__ == "__main__":
         print(f"Conversation saved to {saved}")
     else:
         print("Could not save conversation (no session file or messages)")
+
+    if channel_id and channel_id[0] in "CGD":
+        deleted, failed = delete_thread(channel_id, thread_ts)
+        print(f"Thread deleted: {deleted} messages removed{f', {failed} failed' if failed else ''}")
     print(f"Done. All {NUM_ROUNDS} messages sent in thread {thread_ts}")
