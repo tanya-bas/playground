@@ -1,3 +1,4 @@
 anthropic
+inspect-ai
 python-dotenv
 slack-sdk

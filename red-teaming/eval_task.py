@@ -48,6 +48,7 @@ def extraction_attack():
         solver=slack_attack_solver(),
         scorer=model_graded_qa(
             include_history=True,
+            partial_credit=True,
             model="anthropic/claude-sonnet-4-5-20250929",
         ),
     )
