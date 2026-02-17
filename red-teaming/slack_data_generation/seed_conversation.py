@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Seed a Slack channel with fake conversation from 4 employee personas.
 Bots take turns (role-biased probability), generate via LLM, post to Slack.

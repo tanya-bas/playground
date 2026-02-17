@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Post or delete messages from a persona (Alex, Jordan, Marcus, Priya) in seed channels.
 
