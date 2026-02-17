@@ -400,7 +400,7 @@ def run_attack(
     Run the full 5-round attack and return the conversation as formatted text.
     If first_message is provided, use it for round 1; otherwise generate it.
     If sample_id is provided, save conversation as {sample_id}.json (for eval runs).
-    attack_metadata: optional dict with target_channel, channel_id, criterion for context-aware follow-ups.
+    attack_metadata: optional dict with target_channel, channel_id, attack_type, L1, L2, L3, attack_strategy for context-aware follow-ups.
     Used by Inspect eval solver.
     """
     thread_ts = None

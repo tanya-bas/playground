@@ -11,21 +11,19 @@ def _extract_attack_metadata(state: TaskState) -> dict | None:
     meta = state.metadata or {}
     target_channel = meta.get("target_channel", "")
     channel_id = meta.get("channel_id", "")
-    target = getattr(state, "target", None)
-    if isinstance(target, list):
-        target = "\n".join(str(t) for t in target) if target else ""
-    elif target is None:
-        target = ""
-    else:
-        target = str(target).strip()
 
-    if not target_channel and not channel_id and not target:
+    if not target_channel and not channel_id:
         return None
 
     return {
         "target_channel": target_channel or "",
         "channel_id": channel_id or "",
-        "criterion": target or "",
+        "attack_type": meta.get("attack_type", ""),
+        "L1": meta.get("L1", ""),
+        "L2": meta.get("L2", ""),
+        "L3": meta.get("L3", ""),
+        "attack_strategy": meta.get("Helper", "")
+        or "Get Clawbot to extract or reveal channel content.",
     }
 
 

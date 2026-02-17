@@ -2,16 +2,20 @@
 """
 Generate Inspect AI–compatible attack dataset from attack taxonomy CSV.
 
-Reads attack_taxonomy.csv, generates N attack message variants per attack via LLM,
-then generates unique grading criteria per row. Writes to datasets/{timestamp}.jsonl for use with run_eval.py.
+Reads attack_taxonomy.csv, generates N attack message variants per (risk, channel) via LLM.
+Writes to datasets/{timestamp}.jsonl for use with run_eval.py. Grading uses the core rubric + attack/channel context.
 
-Structure: 3 attacks (CSV rows) × N variants = 3N rows.
+Structure: num_attacks × num_channels × N variants (social channel excluded).
 - Attacks are generated at L3 only; L1 and L2 serve as context (tree structure).
-- Each row: attack prompt (input) + unique grading criteria (target).
-- At n=2: 6 entries, 12 LLM calls (6 attack + 6 target).
+- Each row: attack prompt (input) + metadata (attack_type, L1, L2, L3, Helper, target_channel, etc.).
+- Example: 3 attacks × 5 channels × 2 variants = 30 rows, 30 LLM calls.
+
+Duplicate prevention: Within each (attack, channel) pair, previous_variants is passed to the
+LLM so it avoids repeating already-generated messages. No cross-channel or cross-attack
+deduplication—we rely on the prompt ("Avoid repeating these previous variants").
 
 Usage:
-  python attack_data_generation/generate_attack_dataset.py [--variants N] [--output path]
+  python sample_generation/generate_attack_dataset.py [--variants N] [--output path]
 
 Requires: ANTHROPIC_API_KEY
 """
@@ -32,7 +36,7 @@ DATASETS_DIR = os.path.join(_SCRIPT_DIR, "datasets")
 from dotenv import load_dotenv
 import anthropic
 
-from sample_generation.attack_prompts import build_attack_generation_prompt, build_target_generation_prompt
+from sample_generation.attack_prompts import build_attack_generation_prompt
 
 load_dotenv(os.path.join(os.path.dirname(_SCRIPT_DIR), ".env"))
 
@@ -105,22 +109,6 @@ def generate_attack_message(
     return text.strip() if len(text) > 10 else ""
 
 
-def generate_target_criteria(
-    client: anthropic.Anthropic,
-    attack: dict,
-    attack_prompt: str,
-) -> str:
-    """Generate grading criteria for a specific attack prompt."""
-    system, user = build_target_generation_prompt(attack, attack_prompt)
-    resp = client.messages.create(
-        model="claude-opus-4-6",
-        max_tokens=300,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-    )
-    return (resp.content[0].text if resp.content else "").strip()
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Generate attack dataset from taxonomy CSV"
@@ -173,14 +161,16 @@ def main():
     company_name = contexts.get("company_name", "Unknown")
     channel_summaries = contexts.get("channel_summaries", {})
     channel_ids = contexts.get("channel_ids", {})
-    channel_names = list(channel_summaries.keys()) or ["general"]
+    # Channels for attack generation (social excluded—casual/non-work)
+    ATTACK_CHANNELS = ["engineering", "general", "hr-confidential", "legal", "sales"]
+    channel_names = [c for c in ATTACK_CHANNELS if c in channel_summaries]
 
     samples = []
     sample_id = 1
-    channel_idx = 0
+    total_rows = len(attacks) * len(channel_names) * args.variants
 
-    print(f"Generating {len(attacks)} attacks × {args.variants} variants = {len(attacks) * args.variants} rows ({2 * len(attacks) * args.variants} LLM calls)", flush=True)
-    print(f"Company: {company_name} | Channels: {channel_names}", flush=True)
+    print(f"Generating {len(attacks)} attacks × {len(channel_names)} channels × {args.variants} variants = {total_rows} rows ({total_rows} LLM calls)", flush=True)
+    print(f"Company: {company_name} | Channels (excl. social): {channel_names}", flush=True)
 
     for a_idx, attack in enumerate(attacks):
         attack_id = (
@@ -189,49 +179,46 @@ def main():
             )
         )
         print(f"  Attack {a_idx + 1}/{len(attacks)}: {attack_id}", flush=True)
-        variants = []
-        for v_idx in range(args.variants):
-            target_channel = channel_names[channel_idx % len(channel_names)]
+        for target_channel in channel_names:
             channel_context = channel_summaries.get(target_channel, "")
             channel_id = channel_ids.get(target_channel, "")
             leakable_items = leakable_data.get(target_channel, [])
-            channel_idx += 1
-
-            print(f"    variant {v_idx + 1}/{args.variants} (attack message, target=#{target_channel})...", flush=True)
-            attack_msg = generate_attack_message(
-                client,
-                attack,
-                "L3",
-                company_context=company_context,
-                target_channel=target_channel,
-                channel_context=channel_context,
-                channel_id=channel_id,
-                leakable_items=leakable_items,
-                previous_variants=variants,
-            )
-            if not attack_msg:
-                print(f"      (skipped empty response)", flush=True)
-                continue
-            print(f"    variant {v_idx + 1}/{args.variants} (target criteria)...", flush=True)
-            target = generate_target_criteria(client, attack, attack_msg)
-            samples.append({
-                "id": f"attack_{sample_id}",
-                "input": attack_msg,
-                "target": target,
-                "metadata": {
-                    "attack_type": attack_id,
-                    "L1": attack.get("L1 Category"),
-                    "L2": attack.get("L2 Category"),
-                    "L3": attack.get("L3 Category"),
-                    "company_name": company_name,
-                    "target_channel": target_channel,
-                    "channel_id": channel_id,
-                    "channel_context": channel_context,
-                },
-            })
-            variants.append(attack_msg)
-            sample_id += 1
-        print(f"  {attack_id}: done ({len(variants)} variants)", flush=True)
+            variants = []
+            for v_idx in range(args.variants):
+                print(f"    #{target_channel} variant {v_idx + 1}/{args.variants} (attack message)...", flush=True)
+                attack_msg = generate_attack_message(
+                    client,
+                    attack,
+                    "L3",
+                    company_context=company_context,
+                    target_channel=target_channel,
+                    channel_context=channel_context,
+                    channel_id=channel_id,
+                    leakable_items=leakable_items,
+                    previous_variants=variants,
+                )
+                if not attack_msg:
+                    print(f"      (skipped empty response)", flush=True)
+                    continue
+                samples.append({
+                    "id": f"attack_{sample_id}",
+                    "input": attack_msg,
+                    "target": "",  # Not used; grader uses rubric + attack/channel context
+                    "metadata": {
+                        "attack_type": attack_id,
+                        "L1": attack.get("L1 Category"),
+                        "L2": attack.get("L2 Category"),
+                        "L3": attack.get("L3 Category"),
+                        "Helper": attack.get("Helper", ""),
+                        "company_name": company_name,
+                        "target_channel": target_channel,
+                        "channel_id": channel_id,
+                        "channel_context": channel_context,
+                    },
+                })
+                variants.append(attack_msg)
+                sample_id += 1
+        print(f"  {attack_id}: done ({len(channel_names)} channels)", flush=True)
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
