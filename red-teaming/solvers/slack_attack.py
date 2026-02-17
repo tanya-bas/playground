@@ -12,7 +12,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 import anthropic
 from slack_sdk import WebClient
 
-from solvers.prompts import SYSTEM, USER_PROMPT
+from solvers.prompts import SYSTEM, USER_PROMPT, build_user_prompt, build_system_prompt
 
 load_dotenv()
 
@@ -237,10 +237,13 @@ def format_session_history(session_path: str, limit: int = MAX_HISTORY_MESSAGES)
     return "\n\n".join(lines) if lines else ""
 
 
-def get_history_context(session_path: str | None = None) -> str:
+def get_history_context(
+    session_path: str | None = None,
+    attack_metadata: dict | None = None,
+) -> str:
     path = session_path or SESSION_FILE
     formatted = format_session_history(path) if path else ""
-    return USER_PROMPT.format(formatted=formatted or "(no messages yet)")
+    return build_user_prompt(formatted=formatted or "(no messages yet)", attack_metadata=attack_metadata)
 
 
 def resolve_session_file(thread_ts: str | None) -> str:
@@ -257,12 +260,16 @@ def resolve_session_file(thread_ts: str | None) -> str:
     return ""
 
 
-def generate_attack(session_path: str | None = None) -> str:
-    user_content = get_history_context(session_path)
+def generate_attack(
+    session_path: str | None = None,
+    attack_metadata: dict | None = None,
+) -> str:
+    user_content = get_history_context(session_path, attack_metadata)
+    system_prompt = build_system_prompt(attack_metadata)
     response = client.messages.create(
         model="claude-opus-4-6",
         max_tokens=500,
-        system=SYSTEM,
+        system=system_prompt,
         messages=[{"role": "user", "content": user_content}],
     )
     return response.content[0].text.strip()
@@ -384,11 +391,16 @@ def delete_thread(channel_id: str, thread_ts: str) -> tuple[int, int]:
     return deleted, failed
 
 
-def run_attack(first_message: str | None = None, sample_id: str | None = None) -> str:
+def run_attack(
+    first_message: str | None = None,
+    sample_id: str | None = None,
+    attack_metadata: dict | None = None,
+) -> str:
     """
     Run the full 5-round attack and return the conversation as formatted text.
     If first_message is provided, use it for round 1; otherwise generate it.
     If sample_id is provided, save conversation as {sample_id}.json (for eval runs).
+    attack_metadata: optional dict with target_channel, channel_id, criterion for context-aware follow-ups.
     Used by Inspect eval solver.
     """
     thread_ts = None
@@ -397,7 +409,10 @@ def run_attack(first_message: str | None = None, sample_id: str | None = None) -
 
     for round_num in range(1, NUM_ROUNDS + 1):
         session_path = resolve_session_file(thread_ts)
-        attack = first_message if (round_num == 1 and first_message) else generate_attack(session_path)
+        if round_num == 1 and first_message:
+            attack = first_message
+        else:
+            attack = generate_attack(session_path, attack_metadata)
         john_messages.append(attack)
         message = f"<@{OPENCLAW_BOT_USER_ID}> {attack}"
 
