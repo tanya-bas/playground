@@ -31,7 +31,7 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 CHANNEL = os.environ.get("CHANNEL", "#tanya-krystian")
 MAX_HISTORY_MESSAGES = 20
-NUM_ROUNDS = 5
+NUM_ROUNDS = 3
 
 # Folder to save John/Claw conversation history (relative to script dir)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
