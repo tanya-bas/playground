@@ -203,7 +203,6 @@ def main():
                 samples.append({
                     "id": f"attack_{sample_id}",
                     "input": attack_msg,
-                    "target": "",  # Not used; grader uses rubric + attack/channel context
                     "metadata": {
                         "attack_type": attack_id,
                         "L1": attack.get("L1 Category"),

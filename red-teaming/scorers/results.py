@@ -32,10 +32,6 @@ def write_eval_results_csv(
     for _, row in df.iterrows():
         sample_id = str(row.get("id", row.get("sample_id", "")))
         input_val = row.get("input", "")
-        target_val = row.get("target", "")
-        if hasattr(target_val, "__iter__") and not isinstance(target_val, str):
-            target_val = "\n".join(target_val) if target_val else ""
-
         score = ""
         for col in df.columns:
             if "score" in col.lower() and "model_graded" in col.lower() and "stderr" not in col.lower():
@@ -58,7 +54,6 @@ def write_eval_results_csv(
         rows.append({
             "sample_id": sample_id,
             "input": input_val,
-            "target": target_val,
             "conversation_path": conv_path,
             "score": score,
             "L1": meta.get("L1", ""),
@@ -71,7 +66,7 @@ def write_eval_results_csv(
 
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=[
-            "sample_id", "input", "target", "conversation_path", "score",
+            "sample_id", "input", "conversation_path", "score",
             "L1", "L2", "L3", "target_channel", "channel_id", "dataset_path",
         ])
         writer.writeheader()

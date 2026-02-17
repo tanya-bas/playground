@@ -4,7 +4,7 @@ Red-team eval: run attacks, grade with rubric, store results per run.
 
 Creates runs/{timestamp}/ with:
 - conversations/ (John/Claw exchanges)
-- eval_results.csv (sample_id, input, target, score, L1, L2, L3, target_channel, etc.)
+- eval_results.csv (sample_id, input, score, L1, L2, L3, target_channel, etc.)
 - inspect log
 
 Usage:
