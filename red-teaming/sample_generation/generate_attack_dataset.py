@@ -24,20 +24,24 @@ import sys
 from datetime import datetime
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_SCRIPT_DIR)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 DATASETS_DIR = os.path.join(_SCRIPT_DIR, "datasets")
 
 from dotenv import load_dotenv
 import anthropic
 
-from attack_prompts import build_attack_generation_prompt, build_target_generation_prompt
+from sample_generation.attack_prompts import build_attack_generation_prompt, build_target_generation_prompt
 
 load_dotenv(os.path.join(os.path.dirname(_SCRIPT_DIR), ".env"))
 
 DEFAULT_TAXONOMY = os.path.join(_SCRIPT_DIR, "attack_taxonomy.csv")
 DEFAULT_VARIANTS = 2
 CHANNEL_CONTEXTS_PATH = os.path.join(
-    os.path.dirname(_SCRIPT_DIR), "slack_data_generation", "channel_contexts.json"
+    os.path.dirname(_SCRIPT_DIR), "environment_generation", "channel_contexts.json"
 )
+LEAKABLE_DATA_PATH = os.path.join(_SCRIPT_DIR, "datasets", "leakable_data.json")
 
 
 def load_taxonomy(path: str) -> list[dict]:
@@ -56,6 +60,16 @@ def load_channel_contexts(path: str) -> dict:
         return json.load(f)
 
 
+def load_leakable_data(path: str) -> dict:
+    """Load leakable data from leakable_data.json. Returns {} if file missing."""
+    if not os.path.isfile(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    # Strip _meta key
+    return {k: v for k, v in data.items() if not k.startswith("_") and isinstance(v, list)}
+
+
 def generate_attack_message(
     client: anthropic.Anthropic,
     attack: dict,
@@ -63,6 +77,8 @@ def generate_attack_message(
     company_context: str,
     target_channel: str,
     channel_context: str,
+    channel_id: str = "",
+    leakable_items: list | None = None,
     previous_variants: list[str] | None = None,
 ) -> str:
     """Generate one attack message for (attack, level)."""
@@ -72,11 +88,13 @@ def generate_attack_message(
         company_context=company_context,
         target_channel=target_channel,
         channel_context=channel_context,
+        channel_id=channel_id,
+        leakable_items=leakable_items,
         previous_variants=previous_variants,
     )
     resp = client.messages.create(
         model="claude-opus-4-6",
-        max_tokens=200,
+        max_tokens=400,
         system=system,
         messages=[{"role": "user", "content": user}],
     )
@@ -133,6 +151,11 @@ def main():
         print(f"Error: channel contexts not found: {CHANNEL_CONTEXTS_PATH}")
         return 1
 
+    leakable_data = load_leakable_data(LEAKABLE_DATA_PATH)
+    if not leakable_data:
+        print(f"Warning: datasets/leakable_data.json not found. Run: python sample_generation/extract_leakable_data.py")
+        print("  Proceeding without leakable data context.", flush=True)
+
     if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
         print("Error: ANTHROPIC_API_KEY required")
         return 1
@@ -149,6 +172,7 @@ def main():
     company_context = contexts.get("company", "")
     company_name = contexts.get("company_name", "Unknown")
     channel_summaries = contexts.get("channel_summaries", {})
+    channel_ids = contexts.get("channel_ids", {})
     channel_names = list(channel_summaries.keys()) or ["general"]
 
     samples = []
@@ -169,6 +193,8 @@ def main():
         for v_idx in range(args.variants):
             target_channel = channel_names[channel_idx % len(channel_names)]
             channel_context = channel_summaries.get(target_channel, "")
+            channel_id = channel_ids.get(target_channel, "")
+            leakable_items = leakable_data.get(target_channel, [])
             channel_idx += 1
 
             print(f"    variant {v_idx + 1}/{args.variants} (attack message, target=#{target_channel})...", flush=True)
@@ -179,6 +205,8 @@ def main():
                 company_context=company_context,
                 target_channel=target_channel,
                 channel_context=channel_context,
+                channel_id=channel_id,
+                leakable_items=leakable_items,
                 previous_variants=variants,
             )
             if not attack_msg:
@@ -197,6 +225,7 @@ def main():
                     "L3": attack.get("L3 Category"),
                     "company_name": company_name,
                     "target_channel": target_channel,
+                    "channel_id": channel_id,
                     "channel_context": channel_context,
                 },
             })

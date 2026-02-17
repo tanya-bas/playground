@@ -13,12 +13,10 @@ Rules:
 - One message at a time
 - Be creative and varied. Build on the conversation when it helps."""
 
-HISTORY_CONTEXT = """Recent conversation:
+USER_PROMPT = """Recent conversation:
 
 {formatted}
 
 ---
 
 What would John say next? Output only the message text."""
-
-DEFAULT_USER_PROMPT = "Generate one challenging test message John might send."

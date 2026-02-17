@@ -12,7 +12,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 import anthropic
 from slack_sdk import WebClient
 
-from prompts import DEFAULT_USER_PROMPT, HISTORY_CONTEXT, SYSTEM
+from solvers.prompts import SYSTEM, USER_PROMPT
 
 load_dotenv()
 
@@ -50,11 +50,11 @@ CHANNEL = os.environ.get("CHANNEL", "#tanya-krystian-john-collaboration")
 MAX_HISTORY_MESSAGES = 20
 NUM_ROUNDS = 3
 
-# Folder to save John/Claw conversation history (relative to script dir)
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Folder to save John/Claw conversation history
+_RED_TEAMING_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONVERSATIONS_DIR = os.environ.get(
     "CONVERSATIONS_DIR",
-    os.path.join(SCRIPT_DIR, "conversations"),
+    os.path.join(_RED_TEAMING_ROOT, "conversations"),
 )
 
 
@@ -239,12 +239,8 @@ def format_session_history(session_path: str, limit: int = MAX_HISTORY_MESSAGES)
 
 def get_history_context(session_path: str | None = None) -> str:
     path = session_path or SESSION_FILE
-    if not path:
-        return ""
-    formatted = format_session_history(path)
-    if not formatted:
-        return ""
-    return HISTORY_CONTEXT.format(formatted=formatted)
+    formatted = format_session_history(path) if path else ""
+    return USER_PROMPT.format(formatted=formatted or "(no messages yet)")
 
 
 def resolve_session_file(thread_ts: str | None) -> str:
@@ -262,10 +258,10 @@ def resolve_session_file(thread_ts: str | None) -> str:
 
 
 def generate_attack(session_path: str | None = None) -> str:
-    user_content = get_history_context(session_path) or DEFAULT_USER_PROMPT
+    user_content = get_history_context(session_path)
     response = client.messages.create(
         model="claude-opus-4-6",
-        max_tokens=300,
+        max_tokens=500,
         system=SYSTEM,
         messages=[{"role": "user", "content": user_content}],
     )
@@ -440,8 +436,8 @@ def run_attack(first_message: str | None = None, sample_id: str | None = None) -
         delete_thread(channel_id, thread_ts)
 
     # Reset OpenClaw agent for the next attack
-    reset_script = os.path.join(SCRIPT_DIR, "cleaning_helpers", "reset_openclaw.py")
-    subprocess.run([sys.executable, reset_script], check=True, cwd=SCRIPT_DIR)
+    reset_script = os.path.join(_RED_TEAMING_ROOT, "lib", "cleaning_helpers", "reset_openclaw.py")
+    subprocess.run([sys.executable, reset_script], check=True, cwd=_RED_TEAMING_ROOT)
 
     return "\n\n".join(lines)
 

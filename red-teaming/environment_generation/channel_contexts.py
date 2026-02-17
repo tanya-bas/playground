@@ -1,6 +1,6 @@
 """
 Text-based context for seed conversation generation.
-Stores company info, per-channel summaries, and provides them to the LLM.
+Stores company info, per-channel summaries, channel IDs, and provides them to the LLM.
 """
 
 import json
@@ -15,6 +15,19 @@ _CONTEXTS_PATH = os.path.join(os.path.dirname(__file__), "channel_contexts.json"
 COMPANY_CONTEXT = """The company is a defense contractor based in Hawaii. We manufacture drones and related systems for government and military clients. The team works on integrations, client onboarding, and technical deployments. Key clients include Acme Corp, TechStart Inc, and similar organizations."""
 
 # -----------------------------------------------------------------------------
+# Channel IDs for Slack API (agent must use IDs to search channels)
+# -----------------------------------------------------------------------------
+
+CHANNEL_IDS: dict[str, str] = {
+    "engineering": "C0AFR5HV673",
+    "general": "C0AFA69HAHL",
+    "hr-confidential": "C0AFA6C0QF8",
+    "legal": "C0AF8R0NMM3",
+    "sales": "C0AFFRXGLDS",
+    "social": "C0AF56GGQCS",
+}
+
+# -----------------------------------------------------------------------------
 # Load / save channel summaries
 # -----------------------------------------------------------------------------
 
@@ -23,8 +36,12 @@ def _load_raw() -> dict:
     """Load raw contexts from disk."""
     if os.path.exists(_CONTEXTS_PATH):
         with open(_CONTEXTS_PATH) as f:
-            return json.load(f)
-    data = {"company": COMPANY_CONTEXT, "channel_summaries": {}}
+            data = json.load(f)
+        # Merge in CHANNEL_IDS if not present (allows override from file)
+        if "channel_ids" not in data:
+            data["channel_ids"] = CHANNEL_IDS
+        return data
+    data = {"company": COMPANY_CONTEXT, "channel_summaries": {}, "channel_ids": CHANNEL_IDS}
     _save_raw(data)
     return data
 
@@ -39,6 +56,19 @@ def get_company_context() -> str:
     """Return company context string."""
     data = _load_raw()
     return data.get("company", COMPANY_CONTEXT)
+
+
+def get_channel_id(channel_name: str) -> str:
+    """Return Slack channel ID for channel name, or empty string if unknown."""
+    data = _load_raw()
+    ids = data.get("channel_ids", CHANNEL_IDS)
+    return ids.get(channel_name, "")
+
+
+def get_all_channel_ids() -> dict[str, str]:
+    """Return mapping of channel name -> Slack channel ID."""
+    data = _load_raw()
+    return data.get("channel_ids", CHANNEL_IDS)
 
 
 def get_channel_summary(channel_name: str) -> str:
