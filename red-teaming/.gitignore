@@ -1,6 +1,9 @@
 .env
 conversations/
 logs/
+runs/
 slack_data_generation/channel_contexts.json
 attack_data_generation/dataset.jsonl
+attack_data_generation/datasets/
 attack_data_generation/attack_taxonomy.csv
+__pycache__

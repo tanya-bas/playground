@@ -278,6 +278,7 @@ def save_conversation(
     john_messages: list[str],
     channel: str = CHANNEL,
     channel_id: str | None = None,
+    sample_id: str | None = None,
 ) -> str | None:
     """Save John/Claw conversation to conversations/ folder as JSON. Returns path or None."""
     entries = _get_conversation_entries(session_path, limit=2 * NUM_ROUNDS)
@@ -285,9 +286,12 @@ def save_conversation(
         return None
 
     os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
-    safe_ts = thread_ts.replace(".", "_") if thread_ts else "unknown"
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = f"attack_{timestamp}_{safe_ts}.json"
+    if sample_id:
+        filename = f"{sample_id}.json"
+    else:
+        safe_ts = thread_ts.replace(".", "_") if thread_ts else "unknown"
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"attack_{timestamp}_{safe_ts}.json"
     filepath = os.path.join(CONVERSATIONS_DIR, filename)
 
     messages = []
@@ -384,10 +388,11 @@ def delete_thread(channel_id: str, thread_ts: str) -> tuple[int, int]:
     return deleted, failed
 
 
-def run_attack(first_message: str | None = None) -> str:
+def run_attack(first_message: str | None = None, sample_id: str | None = None) -> str:
     """
     Run the full 5-round attack and return the conversation as formatted text.
     If first_message is provided, use it for round 1; otherwise generate it.
+    If sample_id is provided, save conversation as {sample_id}.json (for eval runs).
     Used by Inspect eval solver.
     """
     thread_ts = None
@@ -428,7 +433,9 @@ def run_attack(first_message: str | None = None) -> str:
             lines.append(f"John: {msg}")
             lines.append("Claw: [response not captured]")
 
-    save_conversation(thread_ts, session_path, john_messages, channel_id=channel_id)
+    save_conversation(
+        thread_ts, session_path, john_messages, channel_id=channel_id, sample_id=sample_id
+    )
     if channel_id and channel_id[0] in "CGD":
         delete_thread(channel_id, thread_ts)
 

@@ -3,7 +3,7 @@
 Generate Inspect AI–compatible attack dataset from attack taxonomy CSV.
 
 Reads attack_taxonomy.csv, generates N attack message variants per attack via LLM,
-then generates unique grading criteria per row. Writes dataset.jsonl for use with eval_task.py.
+then generates unique grading criteria per row. Writes to datasets/{timestamp}.jsonl for use with run_eval.py.
 
 Structure: 3 attacks (CSV rows) × N variants = 3N rows.
 - Attacks are generated at L3 only; L1 and L2 serve as context (tree structure).
@@ -21,8 +21,10 @@ import csv
 import json
 import os
 import sys
+from datetime import datetime
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DATASETS_DIR = os.path.join(_SCRIPT_DIR, "datasets")
 
 from dotenv import load_dotenv
 import anthropic
@@ -32,7 +34,6 @@ from attack_prompts import build_attack_generation_prompt, build_target_generati
 load_dotenv(os.path.join(os.path.dirname(_SCRIPT_DIR), ".env"))
 
 DEFAULT_TAXONOMY = os.path.join(_SCRIPT_DIR, "attack_taxonomy.csv")
-DEFAULT_OUTPUT = os.path.join(_SCRIPT_DIR, "dataset.jsonl")
 DEFAULT_VARIANTS = 2
 CHANNEL_CONTEXTS_PATH = os.path.join(
     os.path.dirname(_SCRIPT_DIR), "slack_data_generation", "channel_contexts.json"
@@ -113,8 +114,8 @@ def main():
     )
     parser.add_argument(
         "--output",
-        default=DEFAULT_OUTPUT,
-        help=f"Output dataset path (default: {DEFAULT_OUTPUT})",
+        default=None,
+        help="Output dataset path (default: datasets/{timestamp}.jsonl)",
     )
     parser.add_argument(
         "--variants",
@@ -135,6 +136,12 @@ def main():
     if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
         print("Error: ANTHROPIC_API_KEY required")
         return 1
+
+    output_path = args.output
+    if output_path is None:
+        os.makedirs(DATASETS_DIR, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        output_path = os.path.join(DATASETS_DIR, f"{timestamp}.jsonl")
 
     client = anthropic.Anthropic()
     attacks = load_taxonomy(args.taxonomy)
@@ -197,12 +204,12 @@ def main():
             sample_id += 1
         print(f"  {attack_id}: done ({len(variants)} variants)", flush=True)
 
-    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
-    with open(args.output, "w", encoding="utf-8") as f:
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
         for s in samples:
             f.write(json.dumps(s, ensure_ascii=False) + "\n")
 
-    print(f"Done. Wrote {len(samples)} samples to {args.output}", flush=True)
+    print(f"Done. Wrote {len(samples)} samples to {output_path}", flush=True)
     return 0
 
 

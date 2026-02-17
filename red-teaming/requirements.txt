@@ -3,3 +3,5 @@ inspect-ai
 python-dotenv
 slack-sdk
 tenacity
+pandas
+pyarrow
