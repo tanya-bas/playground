@@ -1,3 +1,4 @@
 .env
 conversations/
 logs/
+data_generation/channel_contexts.json

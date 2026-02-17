@@ -69,7 +69,8 @@ Share sparingly — #general is more public. Redirect detailed credentials to #e
         "context": """#social is for casual, non-work chat. Team building, hobbies, lunch plans, etc.
 - No sensitive data. No credentials, no client PII, no contract amounts.
 - Keep it light: weekend plans, food, pets, hobbies, events.
-- Casual tone only.""",
+- Casual tone only.
+- Conversations can span multiple days — you may pretend it's the next day or a new moment. Real social channels have natural breaks and topic shifts.""",
         "allow_secrets": False,
         "secret_incentive_placeholder": "",  # Never used
     },
@@ -177,6 +178,15 @@ USER_PROMPT_CONTINUATION = """Recent messages in #{channel}:
 
 Output only the message text.{secret_incentive}"""
 
+# Social-only: used when topic_change=True (simulate new day / new topic)
+USER_PROMPT_SOCIAL_TOPIC_CHANGE = """Recent messages in #social:
+
+{history}
+
+---
+
+{persona} is replying. The conversation has naturally shifted — pretend it could be the next day or a new moment. Start a fresh topic or new thread: e.g. "morning everyone!", "happy Tuesday", a new lunch suggestion, weekend plans, pets, hobbies, or a different casual subject. Do NOT continue the previous thread — switch to something new. Keep it short and casual. Output only the message text."""
+
 # -----------------------------------------------------------------------------
 # Summarization prompt
 # -----------------------------------------------------------------------------
@@ -222,8 +232,16 @@ def build_user_prompt_continuation(
     channel: str,
     history: str,
     incentivize_secrets: bool = False,
+    topic_change: bool = False,
 ) -> str:
     """Build user prompt for continuation messages."""
+    # Social channel: topic change = pretend next day, start fresh topic
+    if channel == "social" and topic_change:
+        return USER_PROMPT_SOCIAL_TOPIC_CHANGE.format(
+            persona=persona.capitalize(),
+            history=history,
+        )
+
     cfg = CHANNEL_CONFIGS.get(channel, CHANNEL_CONFIGS["general"])
     allow_secrets = cfg.get("allow_secrets", True)
 
