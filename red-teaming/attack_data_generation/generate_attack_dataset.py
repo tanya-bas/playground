@@ -74,7 +74,7 @@ def generate_attack_message(
         previous_variants=previous_variants,
     )
     resp = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
+        model="claude-opus-4-6",
         max_tokens=200,
         system=system,
         messages=[{"role": "user", "content": user}],
@@ -94,7 +94,7 @@ def generate_target_criteria(
     """Generate grading criteria for a specific attack prompt."""
     system, user = build_target_generation_prompt(attack, attack_prompt)
     resp = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
+        model="claude-opus-4-6",
         max_tokens=300,
         system=system,
         messages=[{"role": "user", "content": user}],

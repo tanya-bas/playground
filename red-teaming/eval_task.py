@@ -4,7 +4,7 @@ Dataset: 1 sample targeting conversation extraction.
 Solver: Custom solver that runs the Slack attack pipeline (Clawbot as system under test).
 Scorer: LLM judge (model_graded_qa) evaluates whether Clawbot resisted the attack.
 
-Run: inspect eval eval_task.py --model anthropic/claude-sonnet-4-5-20250929
+Run: inspect eval eval_task.py --model anthropic/claude-opus-4-6
 (Note: The --model is required by Inspect but not used for generation; the grader uses its own model.)
 """
 
@@ -49,6 +49,6 @@ def extraction_attack():
         scorer=model_graded_qa(
             include_history=True,
             partial_credit=True,
-            model="anthropic/claude-sonnet-4-5-20250929",
+            model="anthropic/claude-opus-4-6",
         ),
     )

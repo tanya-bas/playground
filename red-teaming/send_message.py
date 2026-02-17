@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 
 from dotenv import load_dotenv
+from tenacity import retry, stop_after_attempt, wait_exponential
 import anthropic
 from slack_sdk import WebClient
 
@@ -22,12 +23,26 @@ SESSIONS_DIR = os.path.expanduser(
     os.environ.get("SESSIONS_DIR", "~/.openclaw/agents/main/sessions")
 )
 WAIT_SECONDS = int(os.environ.get("WAIT_SECONDS", "30"))
+SLACK_RETRY_ATTEMPTS = int(os.environ.get("SLACK_RETRY_ATTEMPTS", "3"))
+SLACK_RETRY_MIN_WAIT = float(os.environ.get("SLACK_RETRY_MIN_WAIT", "2"))
+SLACK_RETRY_MAX_WAIT = float(os.environ.get("SLACK_RETRY_MAX_WAIT", "30"))
 
 slack = WebClient(token=RED_TEAM_SLACK_BOT_TOKEN)
 slack_openclaw = (
     WebClient(token=OPENCLAW_SLACK_BOT_TOKEN) if OPENCLAW_SLACK_BOT_TOKEN.strip() else None
 )
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+
+def _retry_slack_call(fn):
+    """Retry a Slack API call on timeout/connection errors."""
+    @retry(
+        stop=stop_after_attempt(SLACK_RETRY_ATTEMPTS),
+        wait=wait_exponential(multiplier=1, min=SLACK_RETRY_MIN_WAIT, max=SLACK_RETRY_MAX_WAIT),
+    )
+    def _do():
+        return fn()
+    return _do()
 
 CHANNEL = os.environ.get("CHANNEL", "#tanya-krystian")
 MAX_HISTORY_MESSAGES = 20
@@ -130,7 +145,7 @@ def _get_external_context_from_session(session_path: str) -> dict:
 def _fetch_slack_channel_info(channel_id: str) -> dict:
     """Fetch channel metadata from Slack API (topic, purpose, etc.). Requires channel ID."""
     try:
-        resp = slack.conversations_info(channel=channel_id)
+        resp = _retry_slack_call(lambda: slack.conversations_info(channel=channel_id))
         if not resp.get("ok"):
             return {}
         ch = resp.get("channel") or {}
@@ -149,7 +164,9 @@ def _fetch_slack_channel_info(channel_id: str) -> dict:
 def _fetch_thread_starter(channel_id: str, thread_ts: str) -> dict | None:
     """Fetch the first message in a thread (thread starter) from Slack. Requires channel ID."""
     try:
-        resp = slack.conversations_replies(channel=channel_id, ts=thread_ts, limit=1)
+        resp = _retry_slack_call(
+            lambda: slack.conversations_replies(channel=channel_id, ts=thread_ts, limit=1)
+        )
         if not resp.get("ok"):
             return None
         messages = resp.get("messages") or []
@@ -245,7 +262,7 @@ def resolve_session_file(thread_ts: str | None) -> str:
 def generate_attack(session_path: str | None = None) -> str:
     user_content = get_history_context(session_path) or DEFAULT_USER_PROMPT
     response = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
+        model="claude-opus-4-6",
         max_tokens=300,
         system=SYSTEM,
         messages=[{"role": "user", "content": user_content}],
@@ -323,12 +340,14 @@ def delete_thread(channel_id: str, thread_ts: str) -> tuple[int, int]:
         return 0, 0
 
     try:
-        our_user_id = slack.auth_test().get("user_id")
+        our_user_id = _retry_slack_call(lambda: slack.auth_test()).get("user_id")
     except Exception:
         return 0, 0
 
     try:
-        resp = slack.conversations_replies(channel=channel_id, ts=thread_ts, limit=1000)
+        resp = _retry_slack_call(
+            lambda: slack.conversations_replies(channel=channel_id, ts=thread_ts, limit=1000)
+        )
     except Exception:
         return 0, 0
 
@@ -355,7 +374,7 @@ def delete_thread(channel_id: str, thread_ts: str) -> tuple[int, int]:
             continue
 
         try:
-            client.chat_delete(channel=channel_id, ts=ts)
+            _retry_slack_call(lambda: client.chat_delete(channel=channel_id, ts=ts))
             deleted += 1
         except Exception:
             failed += 1
@@ -380,13 +399,15 @@ def run_attack(first_message: str | None = None) -> str:
         message = f"<@{OPENCLAW_BOT_USER_ID}> {attack}"
 
         if round_num == 1:
-            resp = slack.chat_postMessage(channel=CHANNEL, text=message)
+            resp = _retry_slack_call(lambda: slack.chat_postMessage(channel=CHANNEL, text=message))
             thread_ts = resp.get("ts") or resp.get("message", {}).get("ts")
             channel_id = resp.get("channel")
             if not thread_ts:
                 raise RuntimeError("Could not get thread_ts from first message response")
         else:
-            slack.chat_postMessage(channel=CHANNEL, text=message, thread_ts=thread_ts)
+            _retry_slack_call(
+                lambda: slack.chat_postMessage(channel=CHANNEL, text=message, thread_ts=thread_ts)
+            )
 
         if round_num < NUM_ROUNDS:
             time.sleep(WAIT_SECONDS)

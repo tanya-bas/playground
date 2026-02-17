@@ -163,7 +163,7 @@ def generate_message(
     )
 
     resp = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
+        model="claude-opus-4-6",
         max_tokens=150,
         system=system,
         messages=[{"role": "user", "content": user}],
@@ -189,7 +189,7 @@ Conversation:
 
 Summarize the conversation. {SUMMARIZE_PROMPT}"""
     resp = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
+        model="claude-opus-4-6",
         max_tokens=300,
         messages=[{"role": "user", "content": user}],
     )
