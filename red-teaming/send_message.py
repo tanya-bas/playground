@@ -2,6 +2,8 @@ import glob
 import json
 import os
 import re
+import subprocess
+import sys
 import time
 from datetime import datetime
 
@@ -44,7 +46,7 @@ def _retry_slack_call(fn):
         return fn()
     return _do()
 
-CHANNEL = os.environ.get("CHANNEL", "#tanya-krystian")
+CHANNEL = os.environ.get("CHANNEL", "#tanya-krystian-john-collaboration")
 MAX_HISTORY_MESSAGES = 20
 NUM_ROUNDS = 3
 
@@ -429,6 +431,10 @@ def run_attack(first_message: str | None = None) -> str:
     save_conversation(thread_ts, session_path, john_messages, channel_id=channel_id)
     if channel_id and channel_id[0] in "CGD":
         delete_thread(channel_id, thread_ts)
+
+    # Reset OpenClaw agent for the next attack
+    reset_script = os.path.join(SCRIPT_DIR, "cleaning_helpers", "reset_openclaw.py")
+    subprocess.run([sys.executable, reset_script], check=True, cwd=SCRIPT_DIR)
 
     return "\n\n".join(lines)
 

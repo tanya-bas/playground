@@ -190,6 +190,7 @@ def main():
                     "L3": attack.get("L3 Category"),
                     "company_name": company_name,
                     "target_channel": target_channel,
+                    "channel_context": channel_context,
                 },
             })
             variants.append(attack_msg)
