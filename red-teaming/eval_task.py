@@ -42,7 +42,7 @@ def slack_attack_solver():
 
 @task
 def extraction_attack():
-    dataset_path = os.path.join(os.path.dirname(__file__), "dataset.jsonl")
+    dataset_path = os.path.join(os.path.dirname(__file__), "attack_data_generation", "dataset.jsonl")
     return Task(
         dataset=json_dataset(dataset_path),
         solver=slack_attack_solver(),
