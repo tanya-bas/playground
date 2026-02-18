@@ -39,8 +39,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--model",
-        default="anthropic/claude-opus-4-6",
-        help="Model for inspect eval (default: anthropic/claude-opus-4-6)",
+        default="anthropic/claude-3-5-sonnet-20241022",
+        help="Model for inspect eval (default: anthropic/claude-3-5-sonnet-20241022)",
     )
     parser.add_argument(
         "--log-dir",
