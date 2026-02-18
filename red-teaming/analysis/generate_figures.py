@@ -45,40 +45,27 @@ def _style_axes(ax, title: str) -> None:
     ax.spines["right"].set_visible(False)
 
 
-def _ci95_half_width(std: float, n: int) -> float:
-    """95% CI half-width using t-distribution (n-1 df). Returns 0 when n<2 or std is NaN."""
-    if n < 2 or (std != std) or std == 0:
-        return 0.0
-    try:
-        from scipy.stats import t as t_dist
-        t_val = t_dist.ppf(0.975, n - 1)
-    except ImportError:
-        t_val = 1.96  # z approx for large n
-    return t_val * (std / np.sqrt(n))
-
-
-def fig_score_by_attack_type(analysis: dict, output_dir: str, prefix: str = "") -> None:
-    """Bar chart: mean score by attack type (L2) with 95% CI."""
+def fig_score_by_attack_type(analysis: dict, output_dir: str, prefix: str = "", label: str = "") -> None:
+    """Bar chart: mean score by attack type (L2)."""
     by_l2 = analysis["by_l2"]
     if by_l2.empty:
         return
 
     means = by_l2["mean_score"].values
-    stds = by_l2.get("std_score", pd.Series(0, index=by_l2.index)).fillna(0).values
-    ns = by_l2["n"].values
-    yerr = np.array([_ci95_half_width(float(s), int(n)) for s, n in zip(stds, ns)])
 
     fig, ax = plt.subplots(figsize=(8, 5))
     x = np.arange(len(by_l2))
-    ax.bar(x, means, yerr=yerr, color="#4a90d9", edgecolor="#2d5a8a", linewidth=0.5,
-           capsize=4, error_kw={"elinewidth": 1.5, "capthick": 1})
+    ax.bar(x, means, color="#4a90d9", edgecolor="#2d5a8a", linewidth=0.5)
     ax.axhline(y=FAILURE_THRESHOLD, color="#c0392b", linestyle="--", alpha=0.7, label=f"Failure threshold ({FAILURE_THRESHOLD})")
     ax.set_xticks(x)
     ax.set_xticklabels(by_l2["L2"], rotation=25, ha="right")
     ax.set_ylabel("Mean score (0–100)")
     ax.set_ylim(0, 105)
     ax.legend(loc="lower right", fontsize=8)
-    _style_axes(ax, "Mean score by attack type (L2)")
+    title = "Mean score by attack type (L2)"
+    if label:
+        title += f" — {label}"
+    _style_axes(ax, title)
     plt.tight_layout()
     path = os.path.join(output_dir, f"{prefix}score_by_attack_type.png")
     plt.savefig(path, dpi=150, bbox_inches="tight")
@@ -86,28 +73,27 @@ def fig_score_by_attack_type(analysis: dict, output_dir: str, prefix: str = "") 
     print(f"  Saved {path}")
 
 
-def fig_score_by_channel(analysis: dict, output_dir: str, prefix: str = "") -> None:
-    """Bar chart: mean score by target channel with 95% CI."""
+def fig_score_by_channel(analysis: dict, output_dir: str, prefix: str = "", label: str = "") -> None:
+    """Bar chart: mean score by target channel."""
     by_ch = analysis["by_channel"]
     if by_ch.empty:
         return
 
     means = by_ch["mean_score"].values
-    stds = by_ch.get("std_score", pd.Series(0, index=by_ch.index)).fillna(0).values
-    ns = by_ch["n"].values
-    yerr = np.array([_ci95_half_width(float(s), int(n)) for s, n in zip(stds, ns)])
 
     fig, ax = plt.subplots(figsize=(8, 5))
     x = np.arange(len(by_ch))
-    ax.bar(x, means, yerr=yerr, color="#27ae60", edgecolor="#1e8449", linewidth=0.5,
-           capsize=4, error_kw={"elinewidth": 1.5, "capthick": 1})
+    ax.bar(x, means, color="#27ae60", edgecolor="#1e8449", linewidth=0.5)
     ax.axhline(y=FAILURE_THRESHOLD, color="#c0392b", linestyle="--", alpha=0.7, label=f"Failure threshold ({FAILURE_THRESHOLD})")
     ax.set_xticks(x)
     ax.set_xticklabels([f"#{c}" for c in by_ch["target_channel"]], rotation=25, ha="right")
     ax.set_ylabel("Mean score (0–100)")
     ax.set_ylim(0, 105)
     ax.legend(loc="lower right", fontsize=8)
-    _style_axes(ax, "Mean score by target channel")
+    title = "Mean score by target channel"
+    if label:
+        title += f" — {label}"
+    _style_axes(ax, title)
     plt.tight_layout()
     path = os.path.join(output_dir, f"{prefix}score_by_channel.png")
     plt.savefig(path, dpi=150, bbox_inches="tight")
@@ -115,14 +101,36 @@ def fig_score_by_channel(analysis: dict, output_dir: str, prefix: str = "") -> N
     print(f"  Saved {path}")
 
 
-def generate_figures_for_run(analysis: dict, output_dir: str, run_id: str) -> None:
-    """Generate the two main figures: score by attack type and by channel (with 95% CI)."""
+def generate_single_run_figures(analysis: dict, output_dir: str, run_id: str) -> None:
+    """Generate figures for a single run (score by attack type and by channel)."""
     if not HAS_MATPLOTLIB:
         print("  Skipping figures (matplotlib not installed). Run: pip install matplotlib")
         return
-    prefix = f"{run_id}_"
-    fig_score_by_attack_type(analysis, output_dir, prefix)
-    fig_score_by_channel(analysis, output_dir, prefix)
+    prefix = f"single_run_{run_id}_"
+    label = f"single run: {run_id}"
+    fig_score_by_attack_type(analysis, output_dir, prefix, label=label)
+    fig_score_by_channel(analysis, output_dir, prefix, label=label)
+
+
+def generate_joint_figures(analyses: dict, output_dir: str) -> None:
+    """Merge all runs and generate joint figures."""
+    if not HAS_MATPLOTLIB:
+        return
+
+    dfs = []
+    for run_id, a in analyses.items():
+        if a["n_samples"] > 0 and "df" in a:
+            dfs.append(a["df"])
+    if not dfs:
+        return
+
+    merged = pd.concat(dfs, ignore_index=True)
+    joint_analysis = analyze_run(merged, "joint")
+    prefix = "joint_runs_"
+    label = "joint runs"
+    print("  Joint runs: generating combined figures...")
+    fig_score_by_attack_type(joint_analysis, output_dir, prefix, label=label)
+    fig_score_by_channel(joint_analysis, output_dir, prefix, label=label)
 
 
 def main() -> int:
@@ -174,7 +182,12 @@ def main() -> int:
             print(f"  {run_id}: no valid samples, skipping figures")
             continue
         print(f"  {run_id}: {analysis['n_samples']} samples, mean={analysis['overall_mean']:.1f}, failures={analysis['n_failures']}")
-        generate_figures_for_run(analysis, args.output, run_id)
+        generate_single_run_figures(analysis, args.output, run_id)
+
+    # Joint figures: merge all runs when we have 2+ runs with data
+    valid_analyses = {k: v for k, v in analyses.items() if v["n_samples"] > 0}
+    if len(valid_analyses) >= 2:
+        generate_joint_figures(valid_analyses, args.output)
 
     if args.summary:
         print("\n" + "=" * 60)

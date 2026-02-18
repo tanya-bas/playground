@@ -5,3 +5,4 @@ slack-sdk
 tenacity
 pandas
 pyarrow
+matplotlib

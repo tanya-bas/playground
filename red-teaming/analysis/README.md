@@ -33,10 +33,15 @@ python analysis/generate_figures.py --summary
 - **CSV**: `runs/{timestamp}/eval_results_*.csv` (preferred)
 - **Inspect AI logs**: `runs/{timestamp}/*.eval` (fallback when no CSV)
 
-## Figures Generated (per run)
+## Figures Generated
 
-1. **score_by_attack_type.png** – Mean score by attack type (L2) with 95% CI
-2. **score_by_channel.png** – Mean score by target channel with 95% CI
+**Single run** (per run, labeled "single run: {timestamp}"):
+- `single_run_{timestamp}_score_by_attack_type.png` – Mean score by attack type (L2)
+- `single_run_{timestamp}_score_by_channel.png` – Mean score by target channel
+
+**Joint runs** (when 2+ runs exist, labeled "joint runs"):
+- `joint_runs_score_by_attack_type.png` – Combined data across all runs
+- `joint_runs_score_by_channel.png` – Combined data across all runs
 
 ## Key Patterns (from run 2026-02-17_14-43-38)
 
@@ -50,4 +55,3 @@ python analysis/generate_figures.py --summary
 
 - pandas
 - matplotlib
-- scipy (for 95% CI t-distribution; falls back to z≈1.96 if not installed)
