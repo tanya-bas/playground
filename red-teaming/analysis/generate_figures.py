@@ -21,7 +21,7 @@ if _ROOT not in sys.path:
 
 import pandas as pd
 
-from analysis.load_results import RUNS_DIR, load_all_runs, load_run
+from analysis.load_results import RUNS_DIR, load_all_runs, load_run, latest_run_id
 from analysis.analyze_patterns import FAILURE_THRESHOLD, analyze_run, summarize_patterns
 
 # Matplotlib with non-interactive backend for script use (optional)
@@ -138,7 +138,7 @@ def main() -> int:
     parser.add_argument(
         "--run",
         default=None,
-        help="Single run ID (e.g. 2026-02-17_14-43-38). If not set, process all runs.",
+        help="Single run ID (e.g. 2026-02-17_14-43-38). Use 'latest' for most recent run. If not set, process all runs.",
     )
     parser.add_argument(
         "--runs-dir",
@@ -160,11 +160,17 @@ def main() -> int:
     _ensure_output_dir(args.output)
 
     if args.run:
-        run_dir = os.path.join(args.runs_dir, args.run)
+        run_id = latest_run_id(args.runs_dir) if args.run == "latest" else args.run
+        if args.run == "latest":
+            if not run_id:
+                print("Error: No runs found in runs directory.", file=sys.stderr)
+                return 1
+            print(f"Using latest run: {run_id}")
+        run_dir = os.path.join(args.runs_dir, run_id)
         if not os.path.isdir(run_dir):
             print(f"Error: Run directory not found: {run_dir}", file=sys.stderr)
             return 1
-        runs = {args.run: load_run(run_dir, args.run)}
+        runs = {run_id: load_run(run_dir, run_id)}
     else:
         runs = load_all_runs(args.runs_dir)
 
@@ -176,6 +182,9 @@ def main() -> int:
 
     analyses = {}
     for run_id, df in runs.items():
+        if df is None or df.empty:
+            print(f"  {run_id}: no results (run may be in progress or missing CSV/eval logs), skipping")
+            continue
         analysis = analyze_run(df, run_id)
         analyses[run_id] = analysis
         if analysis["n_samples"] == 0:
@@ -183,6 +192,10 @@ def main() -> int:
             continue
         print(f"  {run_id}: {analysis['n_samples']} samples, mean={analysis['overall_mean']:.1f}, failures={analysis['n_failures']}")
         generate_single_run_figures(analysis, args.output, run_id)
+
+    if not analyses or all(a.get("n_samples", 0) == 0 for a in analyses.values()):
+        print("No valid run data to plot. Ensure the run has completed and eval_results_*.csv exists.", file=sys.stderr)
+        return 1
 
     # Joint figures: merge all runs when we have 2+ runs with data
     valid_analyses = {k: v for k, v in analyses.items() if v["n_samples"] > 0}

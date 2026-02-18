@@ -6,4 +6,4 @@ environment_generation/channel_contexts.json
 sample_generation/datasets/
 sample_generation/attack_taxonomy.csv
 __pycache__
-analysis/figures/
+figures

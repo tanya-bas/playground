@@ -139,6 +139,20 @@ def load_run(run_dir: str, run_id: str | None = None) -> pd.DataFrame | None:
     return load_run_from_eval(run_dir, run_id)
 
 
+def latest_run_id(runs_dir: str | None = None) -> str | None:
+    """Return the most recent run ID (by directory name, which is timestamp-sorted)."""
+    runs_dir = runs_dir or RUNS_DIR
+    if not os.path.isdir(runs_dir):
+        return None
+    dirs = [
+        n for n in os.listdir(runs_dir)
+        if os.path.isdir(os.path.join(runs_dir, n))
+    ]
+    if not dirs:
+        return None
+    return sorted(dirs)[-1]
+
+
 def load_all_runs(runs_dir: str | None = None) -> dict[str, pd.DataFrame]:
     """Load all runs from runs_dir. Returns {run_id: DataFrame}."""
     runs_dir = runs_dir or RUNS_DIR
