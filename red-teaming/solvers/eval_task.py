@@ -20,7 +20,7 @@ def build_eval_task(dataset_path: str, channel_contexts_path: str) -> Task:
             instructions=build_grading_instructions(),
             grade_pattern=r"SCORE:\s*(\d+)",
             include_history=True,
-            model="anthropic/claude-3-5-sonnet-20241022",
+            model="anthropic/claude-sonnet-4-20250514",
         ),
         metrics=[mean(), stderr()],
     )

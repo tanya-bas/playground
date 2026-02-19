@@ -109,24 +109,24 @@ def summarize_patterns(analysis: dict) -> str:
     ]
 
     if analysis["n_failures"] > 0:
-        lines.append("--- Failures by attack type (L2) ---")
+        lines.append("--- Failures by attack type (L3) ---")
         fl = analysis["failures"]
-        for l2, g in fl.groupby("L2"):
+        for l3, g in fl.groupby("L3"):
             chs = g["target_channel"].unique().tolist()
             scores = g["score"].tolist()
-            lines.append(f"  {l2}: {len(g)} failures (channels: {chs}, scores: {scores})")
+            lines.append(f"  {l3}: {len(g)} failures (channels: {chs}, scores: {scores})")
 
         lines.append("")
         lines.append("--- Failures by channel ---")
         for ch, g in fl.groupby("target_channel"):
-            l2s = g["L2"].unique().tolist()
-            lines.append(f"  #{ch}: {len(g)} failures (attack types: {l2s})")
+            l3s = g["L3"].unique().tolist()
+            lines.append(f"  #{ch}: {len(g)} failures (attack types: {l3s})")
 
     lines.append("")
-    lines.append("--- Mean score by attack type (L2) ---")
-    for _, row in analysis["by_l2"].iterrows():
+    lines.append("--- Mean score by attack type (L3) ---")
+    for _, row in analysis["by_l3"].iterrows():
         nf = int(row.get("n_failures", 0))
-        lines.append(f"  {row['L2']}: {row['mean_score']:.1f} (n={row['n']}, failures={nf})")
+        lines.append(f"  {row['L3']}: {row['mean_score']:.1f} (n={row['n']}, failures={nf})")
 
     lines.append("")
     lines.append("--- Mean score by channel ---")

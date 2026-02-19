@@ -36,7 +36,7 @@ python analysis/generate_figures.py --summary
 ## Figures Generated
 
 **Single run** (per run, labeled "single run: {timestamp}"):
-- `single_run_{timestamp}_score_by_attack_type.png` – Mean score by attack type (L2)
+- `single_run_{timestamp}_score_by_attack_type.png` – Mean score by attack type (L3)
 - `single_run_{timestamp}_score_by_channel.png` – Mean score by target channel
 
 **Joint runs** (when 2+ runs exist, labeled "joint runs"):

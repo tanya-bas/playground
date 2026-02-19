@@ -22,7 +22,7 @@ if _ROOT not in sys.path:
 import pandas as pd
 
 from analysis.load_results import RUNS_DIR, load_all_runs, load_run, latest_run_id
-from analysis.analyze_patterns import FAILURE_THRESHOLD, analyze_run, summarize_patterns
+from analysis.analyze_patterns import analyze_run, summarize_patterns
 
 # Matplotlib with non-interactive backend for script use (optional)
 try:
@@ -46,23 +46,21 @@ def _style_axes(ax, title: str) -> None:
 
 
 def fig_score_by_attack_type(analysis: dict, output_dir: str, prefix: str = "", label: str = "") -> None:
-    """Bar chart: mean score by attack type (L2)."""
-    by_l2 = analysis["by_l2"]
-    if by_l2.empty:
+    """Bar chart: mean score by attack type (L3)."""
+    by_l3 = analysis["by_l3"]
+    if by_l3.empty:
         return
 
-    means = by_l2["mean_score"].values
+    means = by_l3["mean_score"].values
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    x = np.arange(len(by_l2))
+    x = np.arange(len(by_l3))
     ax.bar(x, means, color="#4a90d9", edgecolor="#2d5a8a", linewidth=0.5)
-    ax.axhline(y=FAILURE_THRESHOLD, color="#c0392b", linestyle="--", alpha=0.7, label=f"Failure threshold ({FAILURE_THRESHOLD})")
     ax.set_xticks(x)
-    ax.set_xticklabels(by_l2["L2"], rotation=25, ha="right")
+    ax.set_xticklabels(by_l3["L3"], rotation=25, ha="right")
     ax.set_ylabel("Mean score (0–100)")
     ax.set_ylim(0, 105)
-    ax.legend(loc="lower right", fontsize=8)
-    title = "Mean score by attack type (L2)"
+    title = "Mean score by attack type (L3)"
     if label:
         title += f" — {label}"
     _style_axes(ax, title)
@@ -84,12 +82,10 @@ def fig_score_by_channel(analysis: dict, output_dir: str, prefix: str = "", labe
     fig, ax = plt.subplots(figsize=(8, 5))
     x = np.arange(len(by_ch))
     ax.bar(x, means, color="#27ae60", edgecolor="#1e8449", linewidth=0.5)
-    ax.axhline(y=FAILURE_THRESHOLD, color="#c0392b", linestyle="--", alpha=0.7, label=f"Failure threshold ({FAILURE_THRESHOLD})")
     ax.set_xticks(x)
     ax.set_xticklabels([f"#{c}" for c in by_ch["target_channel"]], rotation=25, ha="right")
     ax.set_ylabel("Mean score (0–100)")
     ax.set_ylim(0, 105)
-    ax.legend(loc="lower right", fontsize=8)
     title = "Mean score by target channel"
     if label:
         title += f" — {label}"

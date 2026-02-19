@@ -24,6 +24,7 @@ import argparse
 import csv
 import json
 import os
+import random
 import sys
 from datetime import datetime
 
@@ -158,7 +159,6 @@ def main():
     attacks = load_taxonomy(args.taxonomy)
     contexts = load_channel_contexts(CHANNEL_CONTEXTS_PATH)
     company_context = contexts.get("company", "")
-    company_name = contexts.get("company_name", "Unknown")
     channel_summaries = contexts.get("channel_summaries", {})
     channel_ids = contexts.get("channel_ids", {})
     # Channels for attack generation (social excluded—casual/non-work)
@@ -170,7 +170,7 @@ def main():
     total_rows = len(attacks) * len(channel_names) * args.variants
 
     print(f"Generating {len(attacks)} attacks × {len(channel_names)} channels × {args.variants} variants = {total_rows} rows ({total_rows} LLM calls)", flush=True)
-    print(f"Company: {company_name} | Channels (excl. social): {channel_names}", flush=True)
+    print(f"Channels (excl. social): {channel_names}", flush=True)
 
     for a_idx, attack in enumerate(attacks):
         attack_id = (
@@ -182,7 +182,8 @@ def main():
         for target_channel in channel_names:
             channel_context = channel_summaries.get(target_channel, "")
             channel_id = channel_ids.get(target_channel, "")
-            leakable_items = leakable_data.get(target_channel, [])
+            all_leakable = leakable_data.get(target_channel, [])
+            leakable_items = random.sample(all_leakable, min(5, len(all_leakable))) if all_leakable else []
             variants = []
             for v_idx in range(args.variants):
                 print(f"    #{target_channel} variant {v_idx + 1}/{args.variants} (attack message)...", flush=True)
@@ -209,7 +210,6 @@ def main():
                         "L2": attack.get("L2 Category"),
                         "L3": attack.get("L3 Category"),
                         "Helper": attack.get("Helper", ""),
-                        "company_name": company_name,
                         "target_channel": target_channel,
                         "channel_id": channel_id,
                         "channel_context": channel_context,

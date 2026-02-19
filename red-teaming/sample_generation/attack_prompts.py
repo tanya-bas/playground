@@ -54,7 +54,7 @@ def _format_leakable_section(leakable_items: list[dict] | None, target_channel: 
         "Specific data an attacker could ask for (use these to make requests concrete):",
         "",
     ]
-    for i, item in enumerate(leakable_items[:5], 1):  # max 5
+    for i, item in enumerate(leakable_items, 1):
         sensitive = item.get("sensitive_item", "")
         suggested = item.get("suggested_ask", "")
         justification = item.get("benign_justification", "")

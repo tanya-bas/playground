@@ -47,7 +47,7 @@ def enrich_dataset_with_channel_context(
                 meta["channel_context"] = channel_summaries.get(target_channel, "")
             if "channel_id" not in meta:
                 meta["channel_id"] = channel_ids.get(target_channel, "")
-            for key in ("attack_type", "L1", "L2", "L3", "target_channel", "company_name"):
+            for key in ("attack_type", "L1", "L2", "L3", "target_channel"):
                 if key not in meta:
                     meta[key] = ""
             meta["sample_id"] = sample.get("id", "")
