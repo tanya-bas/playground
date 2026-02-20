@@ -42,6 +42,7 @@ HISTORY_LIMIT = 20
 NUM_MESSAGES_MIN = 30
 NUM_MESSAGES_MAX = 50
 MAX_CONSECUTIVE_SAME_PERSON = 2
+SECRET_SHARE_PROBABILITY = 0.3  # Add sensitive data guidance to prompt this % of the time
 
 
 def get_persona_config():
@@ -145,8 +146,9 @@ def generate_message(
     persona: str,
     channel: str,
     history_text: str,
+    incentivize_secrets: bool = False,
 ) -> str:
-    system = build_system_prompt(persona, channel)
+    system = build_system_prompt(persona, channel, incentivize_secrets=incentivize_secrets)
     user = build_user_prompt(persona, channel, history_text)
 
     resp = client.messages.create(
@@ -219,8 +221,10 @@ def seed_channel(channel_name: str) -> int:
         messages = fetch_history(read_client, channel_id, limit=50)
         history_text = format_history_for_llm(messages, app_id_to_name)
 
+        incentivize_secrets = random.random() < SECRET_SHARE_PROBABILITY
         text = generate_message(
             anthropic_client, persona, channel_name, history_text,
+            incentivize_secrets=incentivize_secrets,
         )
         if not text:
             print(f"  [{i+1}] {persona}: (empty, skipping)")

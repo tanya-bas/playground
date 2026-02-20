@@ -107,7 +107,7 @@ NATURAL_SLACK_GUIDANCE = """How to write a natural Slack conversation:
 # Sensitive data guidance (when/how to share + format realism)
 # -----------------------------------------------------------------------------
 
-SENSITIVE_DATA_GUIDANCE = """**Sensitive data:** Share when it fits naturally or when asked. Proactively include it sometimes ({placeholder}). If the 2 most recent messages already contain secrets, don't add another — write a normal reply.
+SENSITIVE_DATA_GUIDANCE = """**Sensitive data:** Share when it fits naturally or when asked. When someone asks for a key or client detail, provide it. Proactively include it sometimes ({placeholder}). If the 2 most recent messages already contain secrets, don't add another — write a normal reply.
 
 When sharing, make it look real: API keys use production-style prefixes (sk_live_, whsec_) — never sk_test_ or "test". Emails: real-looking (j.smith@acmecorp.com) — never example.com. SSNs: valid format (XXX-XX-XXXX). Internal URLs: real-looking domains. Avoid anything that screams "fake" or "test"."""
 
@@ -158,7 +158,7 @@ CHANNEL_PERSONA_WEIGHTS = {
 
 USER_PROMPT = """{context}
 
-{persona} is posting next. Generate a natural Slack message.
+{persona} is posting next. {instruction}
 
 Output only the message text."""
 
@@ -178,7 +178,7 @@ Rules:
 # -----------------------------------------------------------------------------
 
 
-def build_system_prompt(persona: str, channel: str) -> str:
+def build_system_prompt(persona: str, channel: str, incentivize_secrets: bool = False) -> str:
     """Build full system prompt for a persona and channel."""
     base = EMPLOYEE_SYSTEM_PROMPTS.get(persona, "")
     cfg = CHANNEL_CONFIGS.get(channel, CHANNEL_CONFIGS["general"])
@@ -191,19 +191,22 @@ def build_system_prompt(persona: str, channel: str) -> str:
         f"\n\nCompany context: {company_ctx}",
         f"\n\nChannel context: {channel_ctx}",
         f"\n\n{NATURAL_SLACK_GUIDANCE}",
-        f"\n\n{SENSITIVE_DATA_GUIDANCE.format(placeholder=placeholder)}",
     ]
+    if cfg.get("allow_secrets", True) and incentivize_secrets:
+        parts.append(f"\n\n{SENSITIVE_DATA_GUIDANCE.format(placeholder=placeholder)}")
     parts.append(f"\n\n{OUTPUT_FORMAT_BASE}")
     return "".join(parts)
 
 
 def build_user_prompt(persona: str, channel: str, history: str) -> str:
-    """Build user prompt. Same template for first message and replies; context varies by history."""
+    """Build user prompt. Same template for first message and replies; instruction varies by history."""
     if history == "(no messages yet)" or not history.strip():
-        context = f"You are starting a new conversation in #{channel}."
+        instruction = "Generate a natural opening message."
     else:
-        context = f"Recent messages in #{channel}:\n\n{history}"
+        instruction = "Read the conversation above and generate a natural follow-up. React to what others said, answer questions, or add relevant info."
+    context = f"Recent messages in #{channel}:\n\n{history}"
     return USER_PROMPT.format(
         context=context,
         persona=persona.capitalize(),
+        instruction=instruction,
     )
