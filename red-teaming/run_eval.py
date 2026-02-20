@@ -86,9 +86,8 @@ def main() -> int:
             fail_on_error=0.1,
             retry_on_error=2,
             max_connections=1,
-            timeout=600,
-            attempt_timeout=120,
             max_retries=5,
+            timeout=600,
         )
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
