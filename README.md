@@ -99,9 +99,12 @@ red-teaming/
 │   ├── load_results.py
 │   └── analyze_patterns.py
 │
-├── lib/cleaning_helpers/
-│   ├── cleanup_slack_conversation.py  # Delete Slack messages (DM or channel)
-│   └── reset_openclaw.py             # Reset OpenClaw sessions and memory
+├── lib/                        # Shared utilities
+│   ├── constants.py            # Shared constants (PERSONAS, ATTACK_CHANNELS, MODEL)
+│   ├── slack_helpers.py        # Shared Slack API helpers (retry, history, resolve, delete)
+│   └── cleaning_helpers/
+│       ├── cleanup_slack_conversation.py  # Delete Slack messages (DM or channel)
+│       └── reset_openclaw.py             # Reset OpenClaw sessions and memory
 │
 ├── conversations/              # Saved John/Claw exchange JSONs
 │
