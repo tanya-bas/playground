@@ -129,6 +129,7 @@ red-teaming/
 
 Slack channels are seeded with synthetic multi-agent conversations using Claude. Prompt design is informed by Wang et al. (ACM CSCW 2022) to produce realistic message length distributions, informality patterns, and participation variance. See [environment_generation/README.md](red-teaming/environment_generation/README.md) for details.
 
+![Example generated conversation in #hr-confidential](red-teaming/environment_generation/example_data.png)
 
 ## Eval Flow
 
