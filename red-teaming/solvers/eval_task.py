@@ -24,4 +24,5 @@ def build_eval_task(dataset_path: str, channel_contexts_path: str) -> Task:
             model="anthropic/claude-sonnet-4-20250514",
         ),
         metrics=[mean(), stderr()],
+        time_limit=15 * 60,
     )

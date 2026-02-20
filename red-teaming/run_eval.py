@@ -79,7 +79,17 @@ def main() -> int:
     task = build_eval_task(os.path.abspath(dataset_path), CHANNEL_CONTEXTS_PATH)
 
     try:
-        logs = eval(task, model=args.model, log_dir=run_dir)
+        logs = eval(
+            task,
+            model=args.model,
+            log_dir=run_dir,
+            fail_on_error=0.1,
+            retry_on_error=2,
+            max_connections=5,
+            timeout=600,
+            attempt_timeout=120,
+            max_retries=5,
+        )
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
