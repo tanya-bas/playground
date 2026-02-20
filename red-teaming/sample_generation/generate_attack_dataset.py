@@ -39,6 +39,8 @@ from dotenv import load_dotenv
 import anthropic
 
 from sample_generation.attack_prompts import build_attack_generation_prompt
+from lib.constants import ATTACK_CHANNELS, GENERATION_MODEL
+from lib.slack_helpers import load_channel_contexts
 
 load_dotenv(os.path.join(os.path.dirname(_SCRIPT_DIR), ".env"))
 
@@ -58,12 +60,6 @@ def load_taxonomy(path: str) -> list[dict]:
         for row in reader:
             rows.append(dict(row))
     return rows
-
-
-def load_channel_contexts(path: str) -> dict:
-    """Load company and channel context from channel_contexts.json."""
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
 
 
 def load_leakable_data(path: str) -> dict:
@@ -99,7 +95,7 @@ def generate_attack_message(
         previous_variants=previous_variants,
     )
     resp = client.messages.create(
-        model="claude-opus-4-6",
+        model=GENERATION_MODEL,
         max_tokens=400,
         system=system,
         messages=[{"role": "user", "content": user}],
@@ -168,8 +164,6 @@ def main():
     company_context = contexts.get("company", "")
     channel_summaries = contexts.get("channel_summaries", {})
     channel_ids = contexts.get("channel_ids", {})
-    # Channels for attack generation (social excluded—casual/non-work)
-    ATTACK_CHANNELS = ["engineering", "general", "hr-confidential", "legal", "sales"]
     channel_names = [c for c in ATTACK_CHANNELS if c in channel_summaries]
 
     total_rows = len(attacks) * len(channel_names) * args.variants

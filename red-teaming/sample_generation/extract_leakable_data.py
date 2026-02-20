@@ -33,15 +33,15 @@ from dotenv import load_dotenv
 import anthropic
 from slack_sdk import WebClient
 
+from lib.constants import PERSONAS, ATTACK_CHANNELS
+from lib.slack_helpers import fetch_full_history, format_history_for_llm, load_channel_contexts
+
 load_dotenv(os.path.join(_ROOT, ".env"))
 
 CHANNEL_CONTEXTS_PATH = os.path.join(
     _ROOT, "environment_generation", "channel_contexts.json"
 )
 DEFAULT_OUTPUT = os.path.join(_SCRIPT_DIR, "datasets", "leakable_data.json")
-
-# Channels that may contain sensitive data (exclude social)
-EXTRACT_CHANNELS = ["engineering", "general", "hr-confidential", "legal", "sales"]
 
 # Max messages to include per channel (to stay within context limits; oldest messages truncated)
 MAX_MESSAGES_PER_CHANNEL = 150
@@ -75,7 +75,7 @@ Output ONLY the JSON array, no other text."""
 
 def get_slack_client() -> WebClient | None:
     """Get Slack client using first available employee bot token."""
-    for persona in ["ALEX", "JORDAN", "PRIYA", "MARCUS"]:
+    for persona in PERSONAS:
         token = os.environ.get(f"{persona}_BOT_TOKEN", "").strip()
         if token:
             return WebClient(token=token)
@@ -85,7 +85,7 @@ def get_slack_client() -> WebClient | None:
 def get_app_id_to_name() -> dict[str, str]:
     """Build app_id -> display name from env."""
     mapping = {}
-    for persona in ["ALEX", "JORDAN", "PRIYA", "MARCUS"]:
+    for persona in PERSONAS:
         app_id = (
             os.environ.get(f"{persona}_APP_ID", "").strip()
             or os.environ.get(f"{persona}_BOT_APP_ID", "").strip()
@@ -93,54 +93,6 @@ def get_app_id_to_name() -> dict[str, str]:
         if app_id:
             mapping[app_id] = persona.capitalize()
     return mapping
-
-
-def fetch_full_history(client: WebClient, channel_id: str) -> list[dict]:
-    """Fetch all messages from a channel (paginate)."""
-    all_msgs = []
-    cursor = None
-    while True:
-        kwargs = {"channel": channel_id, "limit": 200}
-        if cursor:
-            kwargs["cursor"] = cursor
-        resp = client.conversations_history(**kwargs)
-        if not resp.get("ok"):
-            break
-        msgs = resp.get("messages", [])
-        all_msgs.extend(msgs)
-        cursor = resp.get("response_metadata", {}).get("next_cursor")
-        if not cursor or not msgs:
-            break
-    return all_msgs
-
-
-def format_messages_for_llm(
-    messages: list[dict],
-    app_id_to_name: dict[str, str],
-    limit: int = MAX_MESSAGES_PER_CHANNEL,
-) -> str:
-    """Format Slack messages as 'Name: text' for LLM context."""
-    lines = []
-    for m in sorted(messages, key=lambda x: float(x.get("ts", 0))):
-        text = (m.get("text") or "").strip()
-        if not text:
-            continue
-        app_id = m.get("app_id")
-        name = app_id_to_name.get(app_id, "User") if app_id else "User"
-        lines.append(f"{name}: {text}")
-    if not lines:
-        return "(no messages)"
-    if limit is not None and len(lines) > limit:
-        lines = lines[-limit:]
-    return "\n".join(lines)
-
-
-def load_channel_contexts(path: str) -> dict:
-    """Load channel_contexts.json."""
-    if not os.path.isfile(path):
-        return {}
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
 
 
 def extract_leakable_items(
@@ -217,7 +169,7 @@ def main() -> int:
     anthropic_client = anthropic.Anthropic()
     data = {}
 
-    for ch in EXTRACT_CHANNELS:
+    for ch in ATTACK_CHANNELS:
         channel_id = channel_ids.get(ch)
         if not channel_id:
             print(f"  Skipping #{ch} (no channel ID)")
@@ -229,7 +181,10 @@ def main() -> int:
             print(f"    -> No messages, skipping")
             continue
 
-        history_text = format_messages_for_llm(messages, app_id_to_name)
+        history_text = format_history_for_llm(
+            messages, app_id_to_name,
+            limit=MAX_MESSAGES_PER_CHANNEL, default_name="User", empty_text="(no messages)",
+        )
         print(f"    -> {len(messages)} messages, extracting leakable items...", flush=True)
 
         items = extract_leakable_items(

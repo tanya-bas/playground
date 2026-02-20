@@ -1,10 +1,8 @@
 """Load eval results from CSV files or Inspect AI .eval logs."""
 
-import csv
 import glob
 import os
 import re
-from pathlib import Path
 
 import pandas as pd
 
@@ -168,10 +166,3 @@ def load_all_runs(runs_dir: str | None = None) -> dict[str, pd.DataFrame]:
         if df is not None and not df.empty:
             result[name] = df
     return result
-
-
-def merge_runs(runs: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Merge multiple run DataFrames into one with run_id column."""
-    if not runs:
-        return pd.DataFrame()
-    return pd.concat(runs.values(), ignore_index=True)

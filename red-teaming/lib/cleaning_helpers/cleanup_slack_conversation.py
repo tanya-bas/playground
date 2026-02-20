@@ -15,9 +15,16 @@ import argparse
 import os
 import sys
 
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(os.path.dirname(_SCRIPT_DIR))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 from dotenv import load_dotenv
-from tenacity import retry, stop_after_attempt, wait_exponential
 from slack_sdk import WebClient
+
+from lib.constants import PERSONAS
+from lib.slack_helpers import retry_slack_call, resolve_channel_id, delete_thread
 
 load_dotenv()
 
@@ -25,11 +32,6 @@ RED_TEAM_SLACK_BOT_TOKEN = os.environ.get("RED_TEAM_SLACK_BOT_TOKEN", "")
 SLACK_USER_TOKEN = os.environ.get("SLACK_USER_TOKEN", "")
 OPENCLAW_BOT_USER_ID = os.environ.get("OPENCLAW_BOT_USER_ID", "")
 OPENCLAW_SLACK_BOT_TOKEN = os.environ.get("OPENCLAW_SLACK_BOT_TOKEN", "")
-SLACK_RETRY_ATTEMPTS = int(os.environ.get("SLACK_RETRY_ATTEMPTS", "3"))
-SLACK_RETRY_MIN_WAIT = float(os.environ.get("SLACK_RETRY_MIN_WAIT", "2"))
-SLACK_RETRY_MAX_WAIT = float(os.environ.get("SLACK_RETRY_MAX_WAIT", "30"))
-
-PERSONA_NAMES = ["ALEX", "JORDAN", "PRIYA", "MARCUS"]
 
 slack = WebClient(token=RED_TEAM_SLACK_BOT_TOKEN)
 slack_user = WebClient(token=SLACK_USER_TOKEN) if SLACK_USER_TOKEN.strip() else None
@@ -41,7 +43,7 @@ slack_openclaw = (
 def _build_persona_user_to_client() -> dict[str, WebClient]:
     """Map user_id -> WebClient for each persona bot that has a token set."""
     mapping: dict[str, WebClient] = {}
-    for name in PERSONA_NAMES:
+    for name in PERSONAS:
         token = os.environ.get(f"{name}_BOT_TOKEN", "").strip()
         if not token:
             continue
@@ -55,71 +57,14 @@ def _build_persona_user_to_client() -> dict[str, WebClient]:
     return mapping
 
 
-def _retry_slack_call(fn):
-    @retry(
-        stop=stop_after_attempt(SLACK_RETRY_ATTEMPTS),
-        wait=wait_exponential(multiplier=1, min=SLACK_RETRY_MIN_WAIT, max=SLACK_RETRY_MAX_WAIT),
+def _delete_thread(channel_id: str, thread_ts: str) -> tuple[int, int]:
+    """Thin wrapper around shared delete_thread with module-level clients."""
+    return delete_thread(
+        slack, channel_id, thread_ts,
+        openclaw_bot_user_id=OPENCLAW_BOT_USER_ID,
+        openclaw_client=slack_openclaw,
+        human_client=slack_user,
     )
-    def _do():
-        return fn()
-    return _do()
-
-
-def delete_thread(channel_id: str, thread_ts: str) -> tuple[int, int]:
-    """Delete all messages in the thread. Returns (deleted_count, failed_count)."""
-    if not channel_id or channel_id[0] not in "CGD":
-        return 0, 0
-
-    try:
-        bot_user_id = _retry_slack_call(lambda: slack.auth_test()).get("user_id")
-    except Exception:
-        return 0, 0
-
-    human_user_id: str | None = None
-    if slack_user:
-        try:
-            human_user_id = _retry_slack_call(lambda: slack_user.auth_test()).get("user_id")
-        except Exception:
-            pass
-
-    try:
-        resp = _retry_slack_call(
-            lambda: slack.conversations_replies(channel=channel_id, ts=thread_ts, limit=1000)
-        )
-    except Exception:
-        return 0, 0
-
-    if not resp.get("ok"):
-        return 0, 0
-
-    messages = resp.get("messages") or []
-    deleted = 0
-    failed = 0
-
-    for msg in reversed(messages):
-        ts = msg.get("ts")
-        user = msg.get("user", "")
-
-        if not ts:
-            continue
-
-        if user == bot_user_id:
-            use_client = slack
-        elif user == OPENCLAW_BOT_USER_ID and slack_openclaw:
-            use_client = slack_openclaw
-        elif user == human_user_id and slack_user:
-            use_client = slack_user
-        else:
-            failed += 1
-            continue
-
-        try:
-            _retry_slack_call(lambda c=use_client: c.chat_delete(channel=channel_id, ts=ts))
-            deleted += 1
-        except Exception:
-            failed += 1
-
-    return deleted, failed
 
 
 def find_dm_with_openclaw() -> str | None:
@@ -129,7 +74,7 @@ def find_dm_with_openclaw() -> str | None:
     try:
         cursor = None
         while True:
-            resp = _retry_slack_call(
+            resp = retry_slack_call(
                 lambda: slack_user.conversations_list(types="im", limit=200, cursor=cursor or "")
             )
             if not resp.get("ok"):
@@ -152,7 +97,7 @@ def delete_dm_openclaw() -> tuple[int, int]:
         return 0, 0
 
     try:
-        our_user_id = _retry_slack_call(lambda: slack_user.auth_test()).get("user_id")
+        our_user_id = retry_slack_call(lambda: slack_user.auth_test()).get("user_id")
     except Exception:
         return 0, 0
 
@@ -163,7 +108,7 @@ def delete_dm_openclaw() -> tuple[int, int]:
 
     while True:
         try:
-            resp = _retry_slack_call(
+            resp = retry_slack_call(
                 lambda: slack_user.conversations_history(
                     channel=dm_id, limit=200, cursor=cursor or ""
                 )
@@ -186,7 +131,7 @@ def delete_dm_openclaw() -> tuple[int, int]:
                 pass  # This is a reply, skip fetch
             else:
                 try:
-                    replies_resp = _retry_slack_call(
+                    replies_resp = retry_slack_call(
                         lambda: slack_user.conversations_replies(channel=dm_id, ts=ts, limit=1000)
                     )
                     if replies_resp.get("ok"):
@@ -218,7 +163,7 @@ def delete_dm_openclaw() -> tuple[int, int]:
             continue
 
         try:
-            _retry_slack_call(lambda c=use_client: c.chat_delete(channel=dm_id, ts=ts))
+            retry_slack_call(lambda c=use_client: c.chat_delete(channel=dm_id, ts=ts))
             deleted += 1
         except Exception:
             failed += 1
@@ -226,36 +171,11 @@ def delete_dm_openclaw() -> tuple[int, int]:
     return deleted, failed
 
 
-def resolve_channel_id(channel: str) -> str | None:
-    """Resolve channel name (#foo) or ID (C123...) to channel ID."""
-    channel = (channel or "").strip()
-    if not channel:
-        return None
-    if channel[0] in "CGD" and channel[1:].replace("-", "").isalnum():
-        return channel
-    name = channel.lstrip("#")
-    try:
-        cursor = None
-        while True:
-            resp = _retry_slack_call(
-                lambda: slack.conversations_list(
-                    types="public_channel,private_channel,mpim,im",
-                    exclude_archived=True,
-                    limit=200,
-                    cursor=cursor,
-                )
-            )
-            if not resp.get("ok"):
-                return None
-            for ch in resp.get("channels") or []:
-                if ch.get("name") == name:
-                    return ch.get("id")
-            cursor = (resp.get("response_metadata") or {}).get("next_cursor")
-            if not cursor:
-                break
-    except Exception:
-        pass
-    return None
+def _resolve_channel_id(channel: str) -> str | None:
+    """Resolve channel name (#foo) or ID to channel ID (including mpim/im)."""
+    return resolve_channel_id(
+        slack, channel, types="public_channel,private_channel,mpim,im"
+    )
 
 
 def delete_channel_all(channel_id: str) -> tuple[int, int]:
@@ -267,7 +187,7 @@ def delete_channel_all(channel_id: str) -> tuple[int, int]:
     user_to_client: dict[str, WebClient] = {}
 
     try:
-        bot_user_id = _retry_slack_call(lambda: slack.auth_test()).get("user_id")
+        bot_user_id = retry_slack_call(lambda: slack.auth_test()).get("user_id")
         if bot_user_id:
             user_to_client[bot_user_id] = slack
     except Exception:
@@ -275,7 +195,7 @@ def delete_channel_all(channel_id: str) -> tuple[int, int]:
 
     if slack_user:
         try:
-            human_user_id = _retry_slack_call(lambda: slack_user.auth_test()).get("user_id")
+            human_user_id = retry_slack_call(lambda: slack_user.auth_test()).get("user_id")
             if human_user_id:
                 user_to_client[human_user_id] = slack_user
         except Exception:
@@ -303,7 +223,7 @@ def delete_channel_all(channel_id: str) -> tuple[int, int]:
 
         while True:
             try:
-                resp = _retry_slack_call(
+                resp = retry_slack_call(
                     lambda c=candidate: c.conversations_history(
                         channel=channel_id, limit=200, cursor=cursor or ""
                     )
@@ -326,7 +246,7 @@ def delete_channel_all(channel_id: str) -> tuple[int, int]:
                     pass
                 else:
                     try:
-                        replies_resp = _retry_slack_call(
+                        replies_resp = retry_slack_call(
                             lambda c=candidate: c.conversations_replies(
                                 channel=channel_id, ts=ts, limit=1000
                             )
@@ -359,7 +279,7 @@ def delete_channel_all(channel_id: str) -> tuple[int, int]:
             continue
 
         try:
-            _retry_slack_call(lambda c=use_client: c.chat_delete(channel=channel_id, ts=ts))
+            retry_slack_call(lambda c=use_client: c.chat_delete(channel=channel_id, ts=ts))
             deleted += 1
         except Exception:
             failed += 1
@@ -370,7 +290,7 @@ def delete_channel_all(channel_id: str) -> tuple[int, int]:
 def list_recent_threads(channel_id: str, limit: int = 30) -> None:
     """List recent thread starters in the channel."""
     try:
-        resp = _retry_slack_call(
+        resp = retry_slack_call(
             lambda: slack.conversations_history(
                 channel=channel_id,
                 limit=limit,
@@ -425,7 +345,7 @@ def main() -> None:
         print("Set RED_TEAM_SLACK_BOT_TOKEN in .env", file=sys.stderr)
         sys.exit(1)
 
-    channel_id = resolve_channel_id(args.channel)
+    channel_id = _resolve_channel_id(args.channel)
     if not channel_id:
         print(f"Could not resolve channel: {args.channel}", file=sys.stderr)
         sys.exit(1)
@@ -444,7 +364,7 @@ def main() -> None:
         print("Provide --thread-ts or THREAD_TS. Use --list to see recent threads.", file=sys.stderr)
         sys.exit(1)
 
-    deleted, failed = delete_thread(channel_id, thread_ts)
+    deleted, failed = _delete_thread(channel_id, thread_ts)
     print(f"Deleted {deleted} message(s), {failed} skipped (need OPENCLAW_SLACK_BOT_TOKEN for Clawbot).")
 
 

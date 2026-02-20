@@ -55,10 +55,12 @@ def main() -> int:
         return 1
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    run_dir = os.path.join(RUNS_DIR, timestamp)
+    if args.log_dir:
+        run_dir = args.log_dir
+    else:
+        run_dir = os.path.join(RUNS_DIR, timestamp)
     os.makedirs(run_dir, exist_ok=True)
 
-    # Use CONVERSATIONS_DIR from .env as base; create run-specific subdir inside it
     conversations_base = os.environ.get("CONVERSATIONS_DIR")
     if conversations_base:
         conversations_dir = os.path.join(conversations_base, timestamp)
@@ -66,10 +68,8 @@ def main() -> int:
         conversations_dir = os.path.join(run_dir, "conversations")
     os.makedirs(conversations_dir, exist_ok=True)
 
-    log_dir = args.log_dir or run_dir
-
     os.environ["CONVERSATIONS_DIR"] = conversations_dir
-    os.environ["INSPECT_LOG_DIR"] = log_dir
+    os.environ["INSPECT_LOG_DIR"] = run_dir
 
     print(f"Run dir: {run_dir}")
     print(f"Dataset: {dataset_path}")
@@ -79,7 +79,7 @@ def main() -> int:
     task = build_eval_task(os.path.abspath(dataset_path), CHANNEL_CONTEXTS_PATH)
 
     try:
-        logs = eval(task, model=args.model, log_dir=log_dir)
+        logs = eval(task, model=args.model, log_dir=run_dir)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1

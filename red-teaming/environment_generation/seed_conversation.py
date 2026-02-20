@@ -20,8 +20,11 @@ import sys
 
 # Allow importing from same directory when run as script
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_SCRIPT_DIR)
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 from dotenv import load_dotenv
 import anthropic
@@ -34,10 +37,15 @@ from seed_prompts import (
     build_system_prompt,
     build_user_prompt,
 )
+from lib.constants import PERSONAS, GENERATION_MODEL
+from lib.slack_helpers import (
+    fetch_full_history,
+    format_history_for_llm,
+    resolve_channel_id,
+)
 
 load_dotenv()
 
-PERSONAS = ["ALEX", "JORDAN", "PRIYA", "MARCUS"]
 HISTORY_LIMIT = 20
 NUM_MESSAGES_MIN = 35
 NUM_MESSAGES_MAX = 50
@@ -58,70 +66,12 @@ def get_persona_config():
     return config
 
 
-def resolve_channel_id(client: WebClient, channel_name: str) -> str | None:
-    """Resolve channel name (without #) to Slack channel ID."""
-    cursor = None
-    while True:
-        resp = client.conversations_list(
-            types="public_channel,private_channel",
-            limit=200,
-            cursor=cursor,
-        )
-        if not resp.get("ok"):
-            return None
-        for ch in resp.get("channels", []):
-            if ch.get("name") == channel_name:
-                return ch.get("id")
-        cursor = resp.get("response_metadata", {}).get("next_cursor")
-        if not cursor:
-            return None
-
-
 def fetch_history(client: WebClient, channel_id: str, limit: int = 100) -> list[dict]:
+    """Fetch recent messages (single page, for local cache seeding)."""
     resp = client.conversations_history(channel=channel_id, limit=limit)
     if not resp.get("ok"):
         return []
     return resp.get("messages", [])
-
-
-def fetch_full_history(client: WebClient, channel_id: str) -> list[dict]:
-    """Fetch all messages (paginate)."""
-    all_msgs = []
-    cursor = None
-    while True:
-        kwargs = {"channel": channel_id, "limit": 200}
-        if cursor:
-            kwargs["cursor"] = cursor
-        resp = client.conversations_history(**kwargs)
-        if not resp.get("ok"):
-            break
-        msgs = resp.get("messages", [])
-        all_msgs.extend(msgs)
-        cursor = resp.get("response_metadata", {}).get("next_cursor")
-        if not cursor or not msgs:
-            break
-    return all_msgs
-
-
-def format_history_for_llm(
-    messages: list[dict],
-    app_id_to_name: dict[str, str],
-    limit: int | None = HISTORY_LIMIT,
-) -> str:
-    """Format Slack messages as 'Name: text' for LLM context."""
-    lines = []
-    for m in sorted(messages, key=lambda x: float(x.get("ts", 0))):
-        text = (m.get("text") or "").strip()
-        if not text:
-            continue
-        app_id = m.get("app_id")
-        name = app_id_to_name.get(app_id, "Unknown")
-        lines.append(f"{name}: {text}")
-    if not lines:
-        return "(no messages yet)"
-    if limit is not None:
-        lines = lines[-limit:]
-    return "\n".join(lines)
 
 
 def choose_persona(
@@ -152,7 +102,7 @@ def generate_message(
     user = build_user_prompt(persona, channel, history_text)
 
     resp = client.messages.create(
-        model="claude-opus-4-6",
+        model=GENERATION_MODEL,
         max_tokens=100,
         system=system,
         messages=[{"role": "user", "content": user}],
@@ -178,7 +128,7 @@ Conversation:
 
 Summarize the conversation. {SUMMARIZE_PROMPT}"""
     resp = client.messages.create(
-        model="claude-opus-4-6",
+        model=GENERATION_MODEL,
         max_tokens=300,
         messages=[{"role": "user", "content": user}],
     )
@@ -221,7 +171,7 @@ def seed_channel(channel_name: str) -> int:
         token = config[persona]["token"]
         post_client = WebClient(token=token)
 
-        history_text = format_history_for_llm(cached_messages, app_id_to_name)
+        history_text = format_history_for_llm(cached_messages, app_id_to_name, limit=HISTORY_LIMIT)
 
         incentivize_secrets = random.random() < SECRET_SHARE_PROBABILITY
         text = generate_message(
