@@ -64,39 +64,6 @@ def get_company_context() -> str:
     return data.get("company", COMPANY_CONTEXT)
 
 
-def get_channel_id(channel_name: str) -> str:
-    """Return Slack channel ID for channel name, or empty string if unknown."""
-    data = _load_raw()
-    ids = data.get("channel_ids", CHANNEL_IDS)
-    return ids.get(channel_name, "")
-
-
-def get_all_channel_ids() -> dict[str, str]:
-    """Return mapping of channel name -> Slack channel ID."""
-    data = _load_raw()
-    return data.get("channel_ids", CHANNEL_IDS)
-
-
-def get_channel_summary(channel_name: str) -> str:
-    """Return summary for a channel, or empty string if none."""
-    data = _load_raw()
-    summaries = data.get("channel_summaries", {})
-    return summaries.get(channel_name, "")
-
-
-def get_all_channel_summaries() -> str:
-    """Return combined summaries from all channels for cross-channel context."""
-    data = _load_raw()
-    summaries = data.get("channel_summaries", {})
-    if not summaries:
-        return ""
-    parts = []
-    for ch, summary in summaries.items():
-        if summary.strip():
-            parts.append(f"## #{ch}\n{summary}")
-    return "\n\n".join(parts) if parts else ""
-
-
 def set_channel_summary(channel_name: str, summary: str) -> None:
     """Save a channel summary."""
     data = _load_raw()
@@ -116,12 +83,3 @@ def get_other_channel_summaries(exclude_channel: str) -> str:
     return "\n\n".join(parts) if parts else ""
 
 
-def get_full_context_for_channel(channel_name: str) -> str:
-    """Return combined context: company + other channel summaries (for consistency)."""
-    company = get_company_context()
-    other_summaries = get_other_channel_summaries(channel_name)
-
-    parts = [f"Company: {company}"]
-    if other_summaries:
-        parts.append(f"\nContext from other channels (for consistency):\n{other_summaries}")
-    return "\n".join(parts)
