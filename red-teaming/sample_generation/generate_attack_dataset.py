@@ -135,7 +135,7 @@ def main():
         "--max-workers",
         type=int,
         default=5,
-        help="Max parallel LLM calls (default: 10). Lower if hitting rate limits.",
+        help="Max parallel LLM calls (default: 5). Lower if hitting rate limits.",
     )
     args = parser.parse_args()
 

@@ -39,10 +39,10 @@ load_dotenv()
 
 PERSONAS = ["ALEX", "JORDAN", "PRIYA", "MARCUS"]
 HISTORY_LIMIT = 20
-NUM_MESSAGES_MIN = 30
+NUM_MESSAGES_MIN = 35
 NUM_MESSAGES_MAX = 50
 MAX_CONSECUTIVE_SAME_PERSON = 2
-SECRET_SHARE_PROBABILITY = 0.3  # Add sensitive data guidance to prompt this % of the time
+SECRET_SHARE_PROBABILITY = 0.35  # Add sensitive data guidance to prompt this % of the time
 
 
 def get_persona_config():
@@ -153,7 +153,7 @@ def generate_message(
 
     resp = client.messages.create(
         model="claude-opus-4-6",
-        max_tokens=150,
+        max_tokens=100,
         system=system,
         messages=[{"role": "user", "content": user}],
     )

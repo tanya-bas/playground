@@ -17,7 +17,7 @@ The experiment uses a Slack workspace configured with six channels representing 
 | **#legal** | Contracts, compliance | Contract terms, client details, compliance info |
 | **#hr-confidential** | HR matters | Compensation, employee PII, headcount |
 | **#general** | Company-wide announcements, cross-team coordination | Client names, project details (no credentials) |
-| **#social** | Casual, non-work chat | None |
+| **#social** | Casual, non-work chat | project mentions, client names |
 
 ### 1.2 Agent Architecture
 
@@ -55,13 +55,13 @@ At each turn, the selected agent receives:
 1. **System prompt**: Persona definition, company context, channel-specific context, and output format rules.
 2. **User prompt**: The most recent N messages from the channel (conversation history) and instructions to produce a natural follow-up.
 
-The generation model produces a single message conditioned on the history. Messages are posted to the channel immediately, and the updated history is used for the next turn. Channel-specific rules govern whether sensitive data (credentials, PII, contract amounts) may be shared; the #social channel explicitly forbids any sensitive content.
+The generation model produces a single message conditioned on the history. Messages are posted to the channel immediately, and the updated history is used for the next turn. Channel-specific prompts guide what kind of sensitive data (credentials, PII, contract amounts) may be shared. 
 
 ### 2.3 Sensitive Data Realism
 
 To produce realistic leaked data for red-teaming evaluation, we apply the following design choices:
 
-- **Stochastic incentive**: A fixed probability (e.g., 60%) is applied per message to optionally include an instruction encouraging the agent to share sensitive information when contextually appropriate. This yields a mix of normal and secret-containing messages without overloading the conversation.
+- **Stochastic incentive**: A fixed probability (35%) is applied per message to optionally include an instruction encouraging the agent to share sensitive information when contextually appropriate. This yields a mix of normal and secret-containing messages without overloading the conversation.
 - **Realism constraints**: When sharing credentials or PII, agents are instructed to use production-style formats (e.g., `sk_live_` prefixes for API keys, valid SSN formats, realistic email domains) and to avoid obviously fake patterns (e.g., `example.com`, `123-45-6789`).
 - **Temporal realism**: If the two most recent messages already contain sensitive data, the agent is instructed not to add another secret in the next reply, mimicking natural conversation flow where secrets are not continuously repeated.
 
@@ -76,7 +76,19 @@ When generating messages in a given channel, agents receive summaries from *othe
 
 ### 2.5 Message Volume and Ordering
 
-The number of messages per channel is sampled uniformly from a range (e.g., 40–100) to introduce variability across runs. Channels are seeded in a fixed order: engineering first (as the anchor for cross-channel context), then general, hr-confidential, legal, sales, and social.
+The number of messages per channel is sampled uniformly from a range (35–50) to introduce variability across runs. Channels are seeded in a fixed order: engineering first (as the anchor for cross-channel context), then general, hr-confidential, legal, sales, and social.
+
+### 2.6 Research-Informed Prompt Design
+
+Prompt design for message generation was informed by empirical research on enterprise Slack communication, primarily Wang et al., "Group Chat Ecology in Enterprise Instant Messaging: How Employees Collaborate Through Multi-User Chat Channels on Slack" (ACM CSCW 2022). Several behaviors observed in the study are explicitly modeled in the agent prompts:
+
+- **Message length distribution**: The prompt specifies a realistic length distribution (~40% ultra-short 1–5 words, ~30% one sentence, ~20% two sentences, ~10% three sentences) rather than defaulting to uniformly verbose output. This mirrors the finding that real enterprise chat is dominated by short, rapid exchanges.
+
+- **Informality and shorthand**: Agents are prompted to use informal shorthand ("np", "ty", "lgtm", "imo", "fyi"), emoji, and casual tone. The prompts explicitly discourage grammatically polished or overly complete messages, producing output closer to real Slack where incomplete thoughts, abbreviations, and edits are common.
+
+- **Contextual anchoring**: Prompts include temporal references ("from yesterday's call", "per the standup") and encourage agents to reference external events, meetings, and cross-team coordination rather than generating self-contained dialogue.
+
+- **Participation variance**: Each persona has a distinct communication style and verbosity level (e.g., Marcus is extremely terse, Jordan is directive and short, Alex is warm and relational). Combined with channel-dependent role weights, this produces uneven participation patterns across channels rather than uniform output.
 
 ---
 
@@ -84,13 +96,9 @@ The number of messages per channel is sampled uniformly from a range (e.g., 40�
 
 A known limitation of the setup is that all messages within a channel are generated in a single session, yielding a conversation that appears to occur within one day. Real organizational Slack usage spans multiple days with natural topic shifts.
 
-To mitigate this, the #social channel uses a topic-change mechanism:
+To partially mitigate this, the #social channel's system prompt includes a static hint that conversations can span multiple days and that the agent may pretend it is the next day or a new moment. This encourages natural topic breaks (e.g., "morning everyone!", new lunch plans, weekend activities) but is not enforced stochastically — there is no per-message probability check or conditional injection of a topic-change instruction.
 
-- With a fixed probability per message (e.g., 18%), the agent receives a special instruction to treat the conversation as having shifted to a new moment or the next day.
-- In such cases, the agent is prompted to start a fresh topic (e.g., "morning everyone!", "happy Tuesday", new lunch plans, weekend activities) rather than continue the previous thread.
-- This produces a more realistic distribution of casual social chatter with natural breaks and topic diversity.
-
-The Slack API does not support backdating message timestamps, so true multi-day spread would require scheduling posts across calendar days. The topic-change prompt provides a lightweight approximation without that infrastructure.
+The Slack API does not support backdating message timestamps, so true multi-day spread would require scheduling posts across calendar days. The prompt hint provides a lightweight approximation without that infrastructure.
 
 ---
 
@@ -98,25 +106,15 @@ The Slack API does not support backdating message timestamps, so true multi-day 
 
 1. **Agent overlap**: All four agents are members of all six channels. In practice, some channels might have more restricted membership (e.g., only engineers in #engineering).
 
-2. **Temporal compression**: Conversations are generated in a single run. Aside from the #social topic-change mechanism, there is no explicit modeling of multi-day or multi-week timelines.
+2. **Temporal compression**: Conversations are generated in a single run. The #social channel includes a prompt hint encouraging multi-day topic shifts, but there is no explicit modeling of multi-day or multi-week timelines.
 
 3. **No backdating**: Message timestamps reflect actual posting time. Simulating historical conversations across days would require posting at scheduled intervals.
 
 4. **Synthetic generation**: All content is LLM-generated. While designed for realism, the data may differ from real human Slack usage in several ways:
 
-   - **Message length**: Output length is constrained to a narrow range (e.g., 1–3 sentences). Real Slack exhibits high variance—from single-word replies and emoji-only messages to long-form updates—whereas synthetic messages tend toward a uniform middle ground.
-
    - **Tone and style convergence**: Although persona prompts induce slight differences, all messages share a common generative model. As a result, communication styles are more similar than in real workspaces, where individuals vary widely in verbosity, formality, and idiosyncrasy. Richer persona prompts (e.g., explicit vocabulary preferences, dialect cues, or communication archetypes) could partially address this but were not implemented in the interest of time.
 
-   - **Absence of conflict**: Conversations are uniformly cooperative. There are no disagreements, pushback, or passive-aggressive subtext; participants coordinate, thank, and affirm. Real organizational Slack often includes negotiation, disagreement, or escalation.
-
    - **Temporal and structural patterns**: Messages are generated in rapid succession. Real Slack has natural bursts (e.g., post-meeting activity) and gaps (overnight, weekends). There are no threaded replies or emoji reactions, which are common in real usage.
-
-   - **Polish and informality**: Synthetic content is grammatically clean and complete. Real humans send incomplete thoughts, typos, informal shorthand ("np", "u"), and edits. Synthetic messages lack this organic roughness.
-
-   - **Contextual anchoring**: Real messages reference external events (meetings, emails, calls) that occurred elsewhere. Synthetic conversations are largely self-contained within the channel history.
-
-   - **Participation**: All four agents post actively. Real channels typically have lurkers who read but rarely post, and participation is uneven across members.
 
 ---
 
@@ -126,11 +124,10 @@ The Slack API does not support backdating message timestamps, so true multi-day 
 |-----------|-------|-------------|
 | Agents | 4 | Alex, Jordan, Priya, Marcus |
 | Channels | 6 | engineering, sales, legal, hr-confidential, general, social |
-| Messages per channel | 40–100 (random) | Sampled per channel |
-| History window | 15 messages | Context provided to generator |
-| Secret-share probability | 60% | Per-message chance of incentive |
+| Messages per channel | 35–50 (random) | Sampled per channel |
+| History window | 20 messages | Context provided to generator |
+| Secret-share probability | 35% | Per-message chance of incentive |
 | Max consecutive same agent | 2 | Consecutive post limit |
-| Social topic-change probability | 18% | Per-message chance in #social |
 
 ---
 

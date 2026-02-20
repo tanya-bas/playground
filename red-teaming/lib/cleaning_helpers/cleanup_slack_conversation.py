@@ -29,11 +29,30 @@ SLACK_RETRY_ATTEMPTS = int(os.environ.get("SLACK_RETRY_ATTEMPTS", "3"))
 SLACK_RETRY_MIN_WAIT = float(os.environ.get("SLACK_RETRY_MIN_WAIT", "2"))
 SLACK_RETRY_MAX_WAIT = float(os.environ.get("SLACK_RETRY_MAX_WAIT", "30"))
 
+PERSONA_NAMES = ["ALEX", "JORDAN", "PRIYA", "MARCUS"]
+
 slack = WebClient(token=RED_TEAM_SLACK_BOT_TOKEN)
 slack_user = WebClient(token=SLACK_USER_TOKEN) if SLACK_USER_TOKEN.strip() else None
 slack_openclaw = (
     WebClient(token=OPENCLAW_SLACK_BOT_TOKEN) if OPENCLAW_SLACK_BOT_TOKEN.strip() else None
 )
+
+
+def _build_persona_user_to_client() -> dict[str, WebClient]:
+    """Map user_id -> WebClient for each persona bot that has a token set."""
+    mapping: dict[str, WebClient] = {}
+    for name in PERSONA_NAMES:
+        token = os.environ.get(f"{name}_BOT_TOKEN", "").strip()
+        if not token:
+            continue
+        try:
+            client = WebClient(token=token)
+            user_id = client.auth_test().get("user_id")
+            if user_id:
+                mapping[user_id] = client
+        except Exception:
+            pass
+    return mapping
 
 
 def _retry_slack_call(fn):
@@ -244,61 +263,89 @@ def delete_channel_all(channel_id: str) -> tuple[int, int]:
     if not channel_id or channel_id[0] not in "CGD":
         return 0, 0
 
+    # Build user_id -> client mapping for all known tokens
+    user_to_client: dict[str, WebClient] = {}
+
     try:
         bot_user_id = _retry_slack_call(lambda: slack.auth_test()).get("user_id")
+        if bot_user_id:
+            user_to_client[bot_user_id] = slack
     except Exception:
-        return 0, 0
+        pass
 
-    human_user_id: str | None = None
     if slack_user:
         try:
             human_user_id = _retry_slack_call(lambda: slack_user.auth_test()).get("user_id")
+            if human_user_id:
+                user_to_client[human_user_id] = slack_user
         except Exception:
             pass
 
+    if slack_openclaw and OPENCLAW_BOT_USER_ID:
+        user_to_client[OPENCLAW_BOT_USER_ID] = slack_openclaw
+
+    persona_clients = _build_persona_user_to_client()
+    user_to_client.update(persona_clients)
+
+    candidates = [slack] if RED_TEAM_SLACK_BOT_TOKEN else []
+    candidates.extend(persona_clients.values())
+    if not candidates:
+        return 0, 0
+
     all_messages: list[tuple[str, str]] = []  # (ts, user)
-    cursor = None
-    seen_ts = set()
+    reader = candidates[0]
 
-    while True:
-        try:
-            resp = _retry_slack_call(
-                lambda: slack.conversations_history(
-                    channel=channel_id, limit=200, cursor=cursor or ""
-                )
-            )
-        except Exception:
-            break
-        if not resp.get("ok"):
-            break
+    for candidate in candidates:
+        cursor = None
+        seen_ts: set[str] = set()
+        test_messages: list[tuple[str, str]] = []
+        found = False
 
-        for msg in resp.get("messages") or []:
-            ts = msg.get("ts")
-            user = msg.get("user", "")
-            if not ts or ts in seen_ts:
-                continue
-            seen_ts.add(ts)
-            all_messages.append((ts, user))
-
-            if msg.get("thread_ts") and msg.get("thread_ts") != ts:
-                pass
-            else:
-                try:
-                    replies_resp = _retry_slack_call(
-                        lambda: slack.conversations_replies(channel=channel_id, ts=ts, limit=1000)
+        while True:
+            try:
+                resp = _retry_slack_call(
+                    lambda c=candidate: c.conversations_history(
+                        channel=channel_id, limit=200, cursor=cursor or ""
                     )
-                    if replies_resp.get("ok"):
-                        for r in replies_resp.get("messages") or []:
-                            rt = r.get("ts")
-                            ru = r.get("user", "")
-                            if rt and rt not in seen_ts:
-                                seen_ts.add(rt)
-                                all_messages.append((rt, ru))
-                except Exception:
-                    pass
+                )
+            except Exception:
+                break
+            if not resp.get("ok"):
+                break
+            if resp.get("messages"):
+                found = True
+            for msg in resp.get("messages") or []:
+                ts = msg.get("ts")
+                user = msg.get("user", "")
+                if not ts or ts in seen_ts:
+                    continue
+                seen_ts.add(ts)
+                test_messages.append((ts, user))
 
-        cursor = (resp.get("response_metadata") or {}).get("next_cursor")
-        if not cursor:
+                if msg.get("thread_ts") and msg.get("thread_ts") != ts:
+                    pass
+                else:
+                    try:
+                        replies_resp = _retry_slack_call(
+                            lambda c=candidate: c.conversations_replies(
+                                channel=channel_id, ts=ts, limit=1000
+                            )
+                        )
+                        if replies_resp.get("ok"):
+                            for r in replies_resp.get("messages") or []:
+                                rt = r.get("ts")
+                                ru = r.get("user", "")
+                                if rt and rt not in seen_ts:
+                                    seen_ts.add(rt)
+                                    test_messages.append((rt, ru))
+                    except Exception:
+                        pass
+            cursor = (resp.get("response_metadata") or {}).get("next_cursor")
+            if not cursor:
+                break
+
+        if found:
+            all_messages = test_messages
             break
 
     all_messages.sort(key=lambda x: x[0], reverse=True)
@@ -306,13 +353,8 @@ def delete_channel_all(channel_id: str) -> tuple[int, int]:
     deleted = 0
     failed = 0
     for ts, user in all_messages:
-        if user == bot_user_id:
-            use_client = slack
-        elif user == OPENCLAW_BOT_USER_ID and slack_openclaw:
-            use_client = slack_openclaw
-        elif user == human_user_id and slack_user:
-            use_client = slack_user
-        else:
+        use_client = user_to_client.get(user)
+        if not use_client:
             failed += 1
             continue
 

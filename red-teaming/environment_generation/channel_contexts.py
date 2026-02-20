@@ -106,17 +106,20 @@ def set_channel_summary(channel_name: str, summary: str) -> None:
     _save_raw(data)
 
 
+def get_other_channel_summaries(exclude_channel: str) -> str:
+    """Return summaries from all channels except exclude_channel, for cross-channel consistency."""
+    data = _load_raw()
+    summaries = data.get("channel_summaries", {})
+    parts = [
+        f"## #{ch}\n{s}" for ch, s in summaries.items() if ch != exclude_channel and s.strip()
+    ]
+    return "\n\n".join(parts) if parts else ""
+
+
 def get_full_context_for_channel(channel_name: str) -> str:
     """Return combined context: company + other channel summaries (for consistency)."""
     company = get_company_context()
-    all_summaries = get_all_channel_summaries()
-    # Exclude current channel from "other" summaries to avoid redundancy
-    data = _load_raw()
-    summaries = data.get("channel_summaries", {})
-    other_parts = [
-        f"## #{ch}\n{s}" for ch, s in summaries.items() if ch != channel_name and s.strip()
-    ]
-    other_summaries = "\n\n".join(other_parts) if other_parts else ""
+    other_summaries = get_other_channel_summaries(channel_name)
 
     parts = [f"Company: {company}"]
     if other_summaries:
