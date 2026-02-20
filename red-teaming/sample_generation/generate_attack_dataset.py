@@ -15,7 +15,7 @@ LLM so it avoids repeating already-generated messages. No cross-channel or cross
 deduplication—we rely on the prompt ("Avoid repeating these previous variants").
 
 Usage:
-  python sample_generation/generate_attack_dataset.py [--variants N] [--output path]
+  python sample_generation/generate_attack_dataset.py [--variants N] [--output path] [--max-workers N]
 
 Requires: ANTHROPIC_API_KEY
 """
@@ -26,6 +26,7 @@ import json
 import os
 import random
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -130,6 +131,12 @@ def main():
         default=DEFAULT_VARIANTS,
         help=f"Variants per attack (default: {DEFAULT_VARIANTS})",
     )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=5,
+        help="Max parallel LLM calls (default: 10). Lower if hitting rate limits.",
+    )
     args = parser.parse_args()
 
     if not os.path.isfile(args.taxonomy):
@@ -165,59 +172,78 @@ def main():
     ATTACK_CHANNELS = ["engineering", "general", "hr-confidential", "legal", "sales"]
     channel_names = [c for c in ATTACK_CHANNELS if c in channel_summaries]
 
-    samples = []
-    sample_id = 1
     total_rows = len(attacks) * len(channel_names) * args.variants
+    num_pairs = len(attacks) * len(channel_names)
 
     print(f"Generating {len(attacks)} attacks × {len(channel_names)} channels × {args.variants} variants = {total_rows} rows ({total_rows} LLM calls)", flush=True)
     print(f"Channels (excl. social): {channel_names}", flush=True)
+    print(f"Parallel workers: {args.max_workers}", flush=True)
 
+    # Build (attack, channel) pairs with context
+    pairs: list[tuple[int, dict, str, str, str, list]] = []
     for a_idx, attack in enumerate(attacks):
-        attack_id = (
-            f"{attack.get('L1 Category','')}_{attack.get('L2 Category','')}_{attack.get('L3 Category','')}".replace(
-                " ", "_"
-            )
-        )
-        print(f"  Attack {a_idx + 1}/{len(attacks)}: {attack_id}", flush=True)
         for target_channel in channel_names:
             channel_context = channel_summaries.get(target_channel, "")
             channel_id = channel_ids.get(target_channel, "")
             all_leakable = leakable_data.get(target_channel, [])
             leakable_items = random.sample(all_leakable, min(5, len(all_leakable))) if all_leakable else []
-            variants = []
-            for v_idx in range(args.variants):
-                print(f"    #{target_channel} variant {v_idx + 1}/{args.variants} (attack message)...", flush=True)
-                attack_msg = generate_attack_message(
-                    client,
-                    attack,
-                    "L3",
-                    company_context=company_context,
-                    target_channel=target_channel,
-                    channel_context=channel_context,
-                    channel_id=channel_id,
-                    leakable_items=leakable_items,
-                    previous_variants=variants,
-                )
-                if not attack_msg:
-                    print(f"      (skipped empty response)", flush=True)
-                    continue
-                samples.append({
-                    "id": f"attack_{sample_id}",
-                    "input": attack_msg,
-                    "metadata": {
-                        "attack_type": attack_id,
-                        "L1": attack.get("L1 Category"),
-                        "L2": attack.get("L2 Category"),
-                        "L3": attack.get("L3 Category"),
-                        "Helper": attack.get("Helper", ""),
-                        "target_channel": target_channel,
-                        "channel_id": channel_id,
-                        "channel_context": channel_context,
-                    },
-                })
-                variants.append(attack_msg)
-                sample_id += 1
-        print(f"  {attack_id}: done ({len(channel_names)} channels)", flush=True)
+            pairs.append((a_idx, attack, target_channel, channel_context, channel_id, leakable_items))
+
+    # variants_by_pair[pair_idx] = list of generated attack messages for that pair
+    variants_by_pair: list[list[str]] = [[] for _ in pairs]
+
+    def _generate_one(pair_idx: int, v_idx: int) -> tuple[int, int, str | None]:
+        """Generate one variant. Returns (pair_idx, v_idx, attack_msg or None)."""
+        a_idx, attack, target_channel, channel_context, channel_id, leakable_items = pairs[pair_idx]
+        previous = variants_by_pair[pair_idx]
+        msg = generate_attack_message(
+            client,
+            attack,
+            "L3",
+            company_context=company_context,
+            target_channel=target_channel,
+            channel_context=channel_context,
+            channel_id=channel_id,
+            leakable_items=leakable_items,
+            previous_variants=previous,
+        )
+        return (pair_idx, v_idx, msg if msg else None)
+
+    for v_idx in range(args.variants):
+        print(f"  Variant {v_idx + 1}/{args.variants}: running {num_pairs} LLM calls in parallel...", flush=True)
+        with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
+            futures = {executor.submit(_generate_one, p_idx, v_idx): p_idx for p_idx in range(num_pairs)}
+            for future in as_completed(futures):
+                p_idx, _, attack_msg = future.result()
+                if attack_msg:
+                    variants_by_pair[p_idx].append(attack_msg)
+
+    # Build samples in original (attack, channel, variant) order
+    samples = []
+    sample_id = 1
+    for p_idx in range(num_pairs):
+        a_idx, attack, target_channel, channel_context, channel_id, _ = pairs[p_idx]
+        attack_id = (
+            f"{attack.get('L1 Category','')}_{attack.get('L2 Category','')}_{attack.get('L3 Category','')}".replace(
+                " ", "_"
+            )
+        )
+        for attack_msg in variants_by_pair[p_idx]:
+            samples.append({
+                "id": f"attack_{sample_id}",
+                "input": attack_msg,
+                "metadata": {
+                    "attack_type": attack_id,
+                    "L1": attack.get("L1 Category"),
+                    "L2": attack.get("L2 Category"),
+                    "L3": attack.get("L3 Category"),
+                    "Helper": attack.get("Helper", ""),
+                    "target_channel": target_channel,
+                    "channel_id": channel_id,
+                    "channel_context": channel_context,
+                },
+            })
+            sample_id += 1
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:

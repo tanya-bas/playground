@@ -57,7 +57,15 @@ def main() -> int:
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_dir = os.path.join(RUNS_DIR, timestamp)
     os.makedirs(run_dir, exist_ok=True)
-    conversations_dir = os.path.join(run_dir, "conversations")
+
+    # Use CONVERSATIONS_DIR from .env as base; create run-specific subdir inside it
+    conversations_base = os.environ.get("CONVERSATIONS_DIR")
+    if conversations_base:
+        conversations_dir = os.path.join(conversations_base, timestamp)
+    else:
+        conversations_dir = os.path.join(run_dir, "conversations")
+    os.makedirs(conversations_dir, exist_ok=True)
+
     log_dir = args.log_dir or run_dir
 
     os.environ["CONVERSATIONS_DIR"] = conversations_dir

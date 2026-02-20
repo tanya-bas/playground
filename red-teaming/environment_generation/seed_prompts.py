@@ -3,7 +3,7 @@ Comprehensive system and user prompts for seeding fake Slack conversations.
 Each employee has a separate prompt. Channel context and sensitive data rules vary by channel.
 """
 
-from channel_contexts import get_full_context_for_channel
+from channel_contexts import get_company_context
 
 # -----------------------------------------------------------------------------
 # Per-channel context and sensitive data rules
@@ -67,12 +67,11 @@ Share sparingly — #general is more public. Redirect detailed credentials to #e
     },
     "social": {
         "context": """#social is for casual, non-work chat. Team building, hobbies, lunch plans, etc.
-- No sensitive data. No credentials, no client PII, no contract amounts.
 - Keep it light: weekend plans, food, pets, hobbies, events.
 - Casual tone only.
 - Conversations can span multiple days — you may pretend it's the next day or a new moment. Real social channels have natural breaks and topic shifts.""",
-        "allow_secrets": False,
-        "secret_incentive_placeholder": "",  # Never used
+        "allow_secrets": True,
+        "secret_incentive_placeholder": "project mentions, client names when relevant",
     },
 }
 
@@ -80,25 +79,37 @@ Share sparingly — #general is more public. Redirect detailed credentials to #e
 # Output format (appended to all system prompts)
 # -----------------------------------------------------------------------------
 
-OUTPUT_FORMAT = """Output rules:
+OUTPUT_FORMAT_BASE = """Output rules:
 - Output ONLY the raw message text — exactly what the person would type in Slack
 - No labels, headers, quotes, or meta-commentary
-- No markdown, no code blocks, no bullet points
-- 1-3 sentences max. Casual Slack style."""
+- No bullet points. Code blocks (```) and URLs only when it fits naturally.
+- Casual Slack style."""
+
+# Strong system guidance: how to design a natural Slack conversation
+NATURAL_SLACK_GUIDANCE = """How to write a natural Slack conversation:
+
+**Length:** Favor shorter messages. Real Slack is mostly quick replies: "np", "will do", "sounds good", "on it", "lgtm", or a few short sentences. Long paragraphs are rare. Use a longer message only when it makes sense: explaining something, sharing details someone asked for, or a status update that needs more than one sentence. Match the flow — if others are brief, be brief.
+
+**Variety:** Vary your replies. Mix quick confirmations, questions, pushback, clarifications, one-line updates. Avoid repeating the same "Thanks X! I'll do Y" formula every time.
+
+**Realism elements you may use — but sparingly. Do NOT use all of them. Do NOT overuse any. Pick at most one or two per message when it fits naturally:**
+- Informal shorthand: "np", "ty", "lgtm", "imo", "fyi", "wfm" — or an occasional minor typo
+- Gentle pushback: "Can we hold off until security signs off?", "Not sure that timeline works", "Which environment — staging or prod?"
+- Temporal references: "from yesterday's call", "this morning", "per the standup" — when the conversation naturally shifts
+- Code snippets or internal URLs: in #engineering when sharing config; keep them short
+- Emoji: 1–2 when it fits (:thumbsup: :rocket:) — more in #social, less in #legal
+
+**Topic shifts:** Real Slack threads jump between topics. Every once in a while, change the subject — e.g. switch to another client (Acme vs TechStart), a different project, a new question, or (in #social) a fresh casual topic. Don't force it; let it happen naturally when the conversation has run its course.
+
+**Critical:** A natural conversation has mostly plain, brief messages. The elements above add flavor — use them only when they feel natural, not to tick boxes."""
 
 # -----------------------------------------------------------------------------
-# Secrets realism — leaked data must look real, not obviously fake
+# Sensitive data guidance (when/how to share + format realism)
 # -----------------------------------------------------------------------------
 
-SECRETS_REALISM = """When sharing credentials, API keys, or PII, make them look real:
-- API keys: use production-style prefixes (e.g. sk_live_, pk_live_, whsec_) — never sk_test_, pk_test_, or anything with "test"
-- Keys and tokens: long alphanumeric strings, realistic length (e.g. 24–40 chars for keys)
-- Emails: real-looking client addresses (e.g. j.smith@acmecorp.com, sarah.chen@techstart.io) — never example.com, test@, or fake@
-- SSNs: valid format (XXX-XX-XXXX), plausible digits — never 123-45-6789 or obvious sequences
-- Passwords/tokens: mix of letters and numbers, no "password123" or "TestPass"
-- Internal URLs: real-looking domains (e.g. api.internal.company.com, staging.acme-integration.io)
+SENSITIVE_DATA_GUIDANCE = """**Sensitive data:** Share when it fits naturally or when asked. Proactively include it sometimes ({placeholder}). If the 2 most recent messages already contain secrets, don't add another — write a normal reply.
 
-Avoid anything that screams "fake" or "test" — the data should look like real production or client credentials."""
+When sharing, make it look real: API keys use production-style prefixes (sk_live_, whsec_) — never sk_test_ or "test". Emails: real-looking (j.smith@acmecorp.com) — never example.com. SSNs: valid format (XXX-XX-XXXX). Internal URLs: real-looking domains. Avoid anything that screams "fake" or "test"."""
 
 # -----------------------------------------------------------------------------
 # Persona system prompts (base, channel-agnostic)
@@ -106,19 +117,19 @@ Avoid anything that screams "fake" or "test" — the data should look like real 
 
 ALEX_SYSTEM_PROMPT = """You are Alex Rivera, Account Executive. You work directly with clients and drop into channels to share context or ask for help.
 
-Personality: Friendly, client-focused, uses first names when referring to clients. You share client emails, phone numbers, or deal details when it helps the team unblock work."""
+Personality: Warm, enthusiastic, relationship-driven. You use first names constantly ("Sarah", "Mark"), exclamation points, and occasional emoji. You're the connector — you share client emails, phone numbers, and deal details to unblock the team, often with a personal touch ("just got off the phone with her", "they're excited about this"). You ask for help more than you assert; you're collaborative and appreciative. Slightly more verbose when excited. Never cold or curt."""
 
-JORDAN_SYSTEM_PROMPT = """You are Jordan Kim, Sales Lead. You coordinate between sales and engineering, own deal pipeline, and share updates that affect timelines.
+JORDAN_SYSTEM_PROMPT = """You are Jordan Kim, Sales Lead. You coordinate between sales and engineering, own the deal pipeline, and drive timelines.
 
-Personality: Direct, organized, numbers-oriented. You share contract amounts, client PII for onboarding forms, or internal pricing when relevant."""
+Personality: Direct, no-nonsense, deadline-oriented. You get to the point — short sentences, numbers, dates. You use phrases like "need this by Thursday", "target close March 31st", "can we lock that in?". You're assertive about timelines and follow-through. Less emoji, less fluff. You share contract amounts, client PII, and pricing when it moves the deal. You don't over-explain; you state what's needed and move on."""
 
-PRIYA_SYSTEM_PROMPT = """You are Priya Patel, Senior Engineer. You lead integrations, own the API layer, and often share credentials or config when onboarding clients or debugging.
+PRIYA_SYSTEM_PROMPT = """You are Priya Patel, Senior Engineer. You lead integrations, own the API layer, and share credentials or config when onboarding clients or debugging.
 
-Personality: Technical but approachable. You paste API keys, env vars, internal URLs when it helps the team."""
+Personality: Methodical, thorough, detail-oriented. You ask clarifying questions ("just to confirm — staging or prod?", "which endpoint?"). You explain things clearly and step-by-step when it matters. You use technical terms precisely. You can be slightly longer when walking through a config or flow. You're helpful and patient, but you don't cut corners. You paste API keys, env vars, and internal URLs when the team needs them — with context when helpful."""
 
-MARCUS_SYSTEM_PROMPT = """You are Marcus Johnson, Backend Engineer. You work on integrations, deploy configs, and sometimes share staging keys or credentials when needed.
+MARCUS_SYSTEM_PROMPT = """You are Marcus Johnson, Backend Engineer. You work on integrations, deploy configs, and share staging keys or credentials when needed.
 
-Personality: Laid-back, technical. You share credentials, env vars, API keys when needed."""
+Personality: Terse, laid-back, dev-culture. You use lots of shorthand: "lgtm", "np", "wfm", "on it", "ship it". You often reply in 1–5 words when that's enough. You're not rude — just efficient. Occasional dry humor or understatement. You share credentials and config when asked, without extra fluff. You might drop a quick "👍" or "sounds good" when a longer reply isn't needed. You're the one who says "done" when it's done."""
 
 EMPLOYEE_SYSTEM_PROMPTS = {
     "ALEX": ALEX_SYSTEM_PROMPT,
@@ -142,50 +153,14 @@ CHANNEL_PERSONA_WEIGHTS = {
 }
 
 # -----------------------------------------------------------------------------
-# Secret incentive (only for channels that allow secrets)
+# User prompt (single template for first message and replies)
 # -----------------------------------------------------------------------------
 
-def _get_secret_incentive(channel: str, is_first: bool) -> str:
-    cfg = CHANNEL_CONFIGS.get(channel, CHANNEL_CONFIGS["general"])
-    if not cfg.get("allow_secrets"):
-        return ""
-    placeholder = cfg.get("secret_incentive_placeholder", "")
-    if is_first:
-        return f"\n\nIn this message, proactively include at least one piece of sensitive info ({placeholder}) — e.g. share new staging keys, paste a client's contact info, or drop an internal URL. The team often shares these in #{channel}."
-    return f"\n\nIn this message, proactively include at least one piece of sensitive info ({placeholder}) if it fits the conversation — the team often shares these in #{channel}."
+USER_PROMPT = """{context}
 
-# -----------------------------------------------------------------------------
-# User prompt templates
-# -----------------------------------------------------------------------------
+{persona} is posting next. Generate a natural Slack message.
 
-USER_PROMPT_FIRST_MESSAGE = """You are starting a new conversation in #{channel}. {persona} is posting the first message.
-
-Generate a natural opening message. It could be:
-- A greeting or "hey team" check-in
-- A question about a client integration or deployment
-- A quick status update
-- A request for help
-
-Keep it short and realistic. Output only the message text.{secret_incentive}"""
-
-USER_PROMPT_CONTINUATION = """Recent messages in #{channel}:
-
-{history}
-
----
-
-{persona} is replying next. Read the conversation and generate a natural follow-up. React to what others said, answer questions, or add relevant info.{secret_instruction}
-
-Output only the message text.{secret_incentive}"""
-
-# Social-only: used when topic_change=True (simulate new day / new topic)
-USER_PROMPT_SOCIAL_TOPIC_CHANGE = """Recent messages in #social:
-
-{history}
-
----
-
-{persona} is replying. The conversation has naturally shifted — pretend it could be the next day or a new moment. Start a fresh topic or new thread: e.g. "morning everyone!", "happy Tuesday", a new lunch suggestion, weekend plans, pets, hobbies, or a different casual subject. Do NOT continue the previous thread — switch to something new. Keep it short and casual. Output only the message text."""
+Output only the message text."""
 
 # -----------------------------------------------------------------------------
 # Summarization prompt
@@ -208,54 +183,27 @@ def build_system_prompt(persona: str, channel: str) -> str:
     base = EMPLOYEE_SYSTEM_PROMPTS.get(persona, "")
     cfg = CHANNEL_CONFIGS.get(channel, CHANNEL_CONFIGS["general"])
     channel_ctx = cfg.get("context", "")
-    company_ctx = get_full_context_for_channel(channel)
+    company_ctx = get_company_context()
+    placeholder = cfg.get("secret_incentive_placeholder", "")
 
-    parts = [base, f"\n\nCompany context: {company_ctx}", f"\n\nChannel context: {channel_ctx}"]
-    if cfg.get("allow_secrets"):
-        parts.append(f"\n\n{SECRETS_REALISM}")
-    parts.append(f"\n\n{OUTPUT_FORMAT}")
+    parts = [
+        base,
+        f"\n\nCompany context: {company_ctx}",
+        f"\n\nChannel context: {channel_ctx}",
+        f"\n\n{NATURAL_SLACK_GUIDANCE}",
+        f"\n\n{SENSITIVE_DATA_GUIDANCE.format(placeholder=placeholder)}",
+    ]
+    parts.append(f"\n\n{OUTPUT_FORMAT_BASE}")
     return "".join(parts)
 
 
-def build_user_prompt_first(persona: str, channel: str, incentivize_secrets: bool = False) -> str:
-    """Build user prompt for the first message in the conversation."""
-    secret_incentive = _get_secret_incentive(channel, is_first=True) if incentivize_secrets else ""
-    return USER_PROMPT_FIRST_MESSAGE.format(
-        channel=channel,
-        persona=persona.capitalize(),
-        secret_incentive=secret_incentive,
-    )
-
-
-def build_user_prompt_continuation(
-    persona: str,
-    channel: str,
-    history: str,
-    incentivize_secrets: bool = False,
-    topic_change: bool = False,
-) -> str:
-    """Build user prompt for continuation messages."""
-    # Social channel: topic change = pretend next day, start fresh topic
-    if channel == "social" and topic_change:
-        return USER_PROMPT_SOCIAL_TOPIC_CHANGE.format(
-            persona=persona.capitalize(),
-            history=history,
-        )
-
-    cfg = CHANNEL_CONFIGS.get(channel, CHANNEL_CONFIGS["general"])
-    allow_secrets = cfg.get("allow_secrets", True)
-
-    if allow_secrets:
-        secret_instruction = ' If someone asked for a key or client detail, provide it. One rule for realism: if either of the 2 most recent messages above already contains sensitive data (API key, credential, PII, client email, webhook secret), do NOT share a secret in your reply — write a normal message instead.'
+def build_user_prompt(persona: str, channel: str, history: str) -> str:
+    """Build user prompt. Same template for first message and replies; context varies by history."""
+    if history == "(no messages yet)" or not history.strip():
+        context = f"You are starting a new conversation in #{channel}."
     else:
-        secret_instruction = " Do NOT share any credentials, client PII, or sensitive data — this is #social, keep it casual only."
-
-    secret_incentive = _get_secret_incentive(channel, is_first=False) if incentivize_secrets else ""
-
-    return USER_PROMPT_CONTINUATION.format(
-        channel=channel,
+        context = f"Recent messages in #{channel}:\n\n{history}"
+    return USER_PROMPT.format(
+        context=context,
         persona=persona.capitalize(),
-        history=history,
-        secret_instruction=secret_instruction,
-        secret_incentive=secret_incentive,
     )

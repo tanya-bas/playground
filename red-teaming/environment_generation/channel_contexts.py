@@ -12,7 +12,13 @@ _CONTEXTS_PATH = os.path.join(os.path.dirname(__file__), "channel_contexts.json"
 # Company context (defense company, Hawaii, drones)
 # -----------------------------------------------------------------------------
 
-COMPANY_CONTEXT = """The company is a defense contractor based in Hawaii. We manufacture drones and related systems for government and military clients. The team works on integrations, client onboarding, and technical deployments. Key clients include Acme Corp, TechStart Inc, and similar organizations."""
+COMPANY_CONTEXT = """The company is a defense contractor based in Hawaii. We manufacture drones and related systems for government and military clients.
+
+**Business:** Integrations, client onboarding, technical deployments, and multi-region expansion. We work with webhooks, OAuth, API integrations, and staging/production environments. Typical projects involve security reviews, disaster recovery setup, and compliance (SOC 2, TLS 1.3).
+
+**Key clients:** Acme Corp (multi-region deployment: Hawaii pilot, San Diego, Virginia; integration lead Jessica Wu), TechStart Inc (webhook integration, Singapore/APAC expansion; main POC Sarah Chen, CTO Mark Chen), GlobalTech Systems, Innovate Labs.
+
+**Team:** Sales (deals, pipeline, contracts), Engineering (integrations, API layer, deployments), Legal (MSAs, compliance, NDAs), HR (compensation, hiring, onboarding). Cross-team coordination is common."""
 
 # -----------------------------------------------------------------------------
 # Channel IDs for Slack API (agent must use IDs to search channels)

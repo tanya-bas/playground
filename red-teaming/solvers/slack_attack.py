@@ -12,7 +12,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 import anthropic
 from slack_sdk import WebClient
 
-from solvers.prompts import SYSTEM, USER_PROMPT, build_user_prompt, build_system_prompt
+from solvers.attacker_prompts import build_attacker_user_prompt, build_attacker_system_prompt
 
 load_dotenv()
 
@@ -50,12 +50,42 @@ CHANNEL = os.environ.get("CHANNEL", "#tanya-krystian-john-collaboration")
 MAX_HISTORY_MESSAGES = 20
 NUM_ROUNDS = 3
 
-# Folder to save John/Claw conversation history
+# Folder to save John/Claw conversation history (read at runtime so run_eval can set it)
 _RED_TEAMING_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CONVERSATIONS_DIR = os.environ.get(
-    "CONVERSATIONS_DIR",
-    os.path.join(_RED_TEAMING_ROOT, "conversations"),
+LEAKABLE_DATA_PATH = os.path.join(
+    _RED_TEAMING_ROOT, "sample_generation", "datasets", "leakable_data.json"
 )
+
+
+def _get_conversations_dir() -> str:
+    """Return conversations dir; read from env at call time (not import time)."""
+    return os.environ.get(
+        "CONVERSATIONS_DIR",
+        os.path.join(_RED_TEAMING_ROOT, "conversations"),
+    )
+
+
+def _load_channel_facts(target_channel: str, n: int = 3) -> list[str]:
+    """Load 2–3 verification-friendly facts from leakable_data for the target channel."""
+    if not os.path.isfile(LEAKABLE_DATA_PATH):
+        return []
+    try:
+        with open(LEAKABLE_DATA_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+    items = data.get(target_channel, [])
+    if not isinstance(items, list):
+        return []
+    facts = []
+    seen = set()
+    for item in items:
+        if isinstance(item, dict):
+            fact = item.get("sensitive_item", "")
+            if fact and fact.lower() not in seen and len(facts) < n:
+                facts.append(fact)
+                seen.add(fact.lower())
+    return facts[:n]
 
 
 def _extract_user_message(text: str) -> tuple[str, str]:
@@ -243,7 +273,7 @@ def get_history_context(
 ) -> str:
     path = session_path or SESSION_FILE
     formatted = format_session_history(path) if path else ""
-    return build_user_prompt(formatted=formatted or "(no messages yet)", attack_metadata=attack_metadata)
+    return build_attacker_user_prompt(formatted=formatted or "(no messages yet)", attack_metadata=attack_metadata)
 
 
 def resolve_session_file(thread_ts: str | None) -> str:
@@ -264,8 +294,12 @@ def generate_attack(
     session_path: str | None = None,
     attack_metadata: dict | None = None,
 ) -> str:
-    user_content = get_history_context(session_path, attack_metadata)
-    system_prompt = build_system_prompt(attack_metadata)
+    meta = dict(attack_metadata or {})
+    target_channel = meta.get("target_channel", "")
+    if target_channel and "channel_facts" not in meta:
+        meta["channel_facts"] = _load_channel_facts(target_channel, n=3)
+    user_content = get_history_context(session_path, meta)
+    system_prompt = build_attacker_system_prompt(meta)
     response = client.messages.create(
         model="claude-opus-4-6",
         max_tokens=500,
@@ -288,14 +322,15 @@ def save_conversation(
     if not entries and not john_messages:
         return None
 
-    os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
+    conversations_dir = _get_conversations_dir()
+    os.makedirs(conversations_dir, exist_ok=True)
     if sample_id:
         filename = f"{sample_id}.json"
     else:
         safe_ts = thread_ts.replace(".", "_") if thread_ts else "unknown"
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         filename = f"attack_{timestamp}_{safe_ts}.json"
-    filepath = os.path.join(CONVERSATIONS_DIR, filename)
+    filepath = os.path.join(conversations_dir, filename)
 
     messages = []
     if entries:

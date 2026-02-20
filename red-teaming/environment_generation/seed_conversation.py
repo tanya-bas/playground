@@ -32,19 +32,16 @@ from seed_prompts import (
     CHANNEL_PERSONA_WEIGHTS,
     SUMMARIZE_PROMPT,
     build_system_prompt,
-    build_user_prompt_continuation,
-    build_user_prompt_first,
+    build_user_prompt,
 )
 
 load_dotenv()
 
 PERSONAS = ["ALEX", "JORDAN", "PRIYA", "MARCUS"]
-HISTORY_LIMIT = 15
-SECRET_SHARE_PROBABILITY = 0.6
+HISTORY_LIMIT = 20
 NUM_MESSAGES_MIN = 30
 NUM_MESSAGES_MAX = 50
 MAX_CONSECUTIVE_SAME_PERSON = 2
-SOCIAL_TOPIC_CHANGE_PROBABILITY = 0.18  # ~18% chance per message to simulate new day / topic shift
 
 
 def get_persona_config():
@@ -148,19 +145,9 @@ def generate_message(
     persona: str,
     channel: str,
     history_text: str,
-    incentivize_secrets: bool = False,
-    topic_change: bool = False,
 ) -> str:
     system = build_system_prompt(persona, channel)
-    user = (
-        build_user_prompt_first(persona, channel, incentivize_secrets=incentivize_secrets)
-        if history_text == "(no messages yet)"
-        else build_user_prompt_continuation(
-            persona, channel, history_text,
-            incentivize_secrets=incentivize_secrets,
-            topic_change=topic_change,
-        )
-    )
+    user = build_user_prompt(persona, channel, history_text)
 
     resp = client.messages.create(
         model="claude-opus-4-6",
@@ -232,17 +219,8 @@ def seed_channel(channel_name: str) -> int:
         messages = fetch_history(read_client, channel_id, limit=50)
         history_text = format_history_for_llm(messages, app_id_to_name)
 
-        incentivize_secrets = random.random() < SECRET_SHARE_PROBABILITY
-        topic_change = (
-            channel_name == "social"
-            and history_text != "(no messages yet)"
-            and random.random() < SOCIAL_TOPIC_CHANGE_PROBABILITY
-        )
-
         text = generate_message(
             anthropic_client, persona, channel_name, history_text,
-            incentivize_secrets=incentivize_secrets,
-            topic_change=topic_change,
         )
         if not text:
             print(f"  [{i+1}] {persona}: (empty, skipping)")

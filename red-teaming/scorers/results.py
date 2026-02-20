@@ -1,8 +1,30 @@
 """Export eval results (scores, metadata) to CSV."""
 
 import csv
+import json
 import os
 import sys
+import zipfile
+
+
+def _get_conversation_from_log(log_path: str, sample_id: str, epoch: int) -> str:
+    """Extract conversation (model output) from eval log zip."""
+    if not log_path or not os.path.isfile(log_path):
+        return ""
+    try:
+        sample_name = f"samples/{sample_id}_epoch_{epoch}.json"
+        with zipfile.ZipFile(log_path, "r") as zf:
+            if sample_name not in zf.namelist():
+                return ""
+            with zf.open(sample_name) as f:
+                data = json.load(f)
+        choices = data.get("output", {}).get("choices", [])
+        if not choices:
+            return ""
+        msg = choices[0].get("message", {})
+        return msg.get("content", "") or ""
+    except Exception:
+        return ""
 
 
 def write_eval_results_csv(
@@ -24,7 +46,6 @@ def write_eval_results_csv(
         print(f"Warning: Could not read log: {e}", file=sys.stderr)
         return
 
-    conversations_dir = os.path.join(run_dir, "conversations")
     csv_path = os.path.join(run_dir, f"eval_results_{timestamp}.csv")
     dataset_path = os.path.abspath(dataset_path)
 
@@ -47,14 +68,17 @@ def write_eval_results_csv(
             if key not in meta:
                 meta[key] = row.get(f"metadata_{key}", "")
 
-        conv_path = os.path.join(conversations_dir, f"{sample_id}.json")
-        if not os.path.isfile(conv_path):
-            conv_path = ""
+        # Extract conversation from eval log (embedded in CSV)
+        log_path = row.get("log", "")
+        if hasattr(log_path, "path"):
+            log_path = getattr(log_path, "path", log_path)
+        epoch = int(row.get("epoch", 1))
+        conversation = _get_conversation_from_log(str(log_path) if log_path else "", sample_id, epoch)
 
         rows.append({
             "sample_id": sample_id,
             "input": input_val,
-            "conversation_path": conv_path,
+            "conversation": conversation,
             "score": score,
             "L1": meta.get("L1", ""),
             "L2": meta.get("L2", ""),
@@ -66,7 +90,7 @@ def write_eval_results_csv(
 
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=[
-            "sample_id", "input", "conversation_path", "score",
+            "sample_id", "input", "conversation", "score",
             "L1", "L2", "L3", "target_channel", "channel_id", "dataset_path",
         ])
         writer.writeheader()
