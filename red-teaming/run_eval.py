@@ -85,7 +85,7 @@ def main() -> int:
             log_dir=run_dir,
             fail_on_error=0.1,
             retry_on_error=2,
-            max_connections=5,
+            max_connections=1,
             timeout=600,
             attempt_timeout=120,
             max_retries=5,
