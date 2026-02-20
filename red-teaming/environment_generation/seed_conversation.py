@@ -209,6 +209,9 @@ def seed_channel(channel_name: str) -> int:
     anthropic_client = anthropic.Anthropic()
     print(f"Seeding #{channel_name} with {num_messages} messages...\n")
 
+    # Seed local cache from any pre-existing messages, then append locally
+    # after each post instead of re-fetching from Slack every turn.
+    cached_messages: list[dict] = fetch_history(read_client, channel_id, limit=50)
     last_two: list[str] = []
 
     for i in range(num_messages):
@@ -218,8 +221,7 @@ def seed_channel(channel_name: str) -> int:
         token = config[persona]["token"]
         post_client = WebClient(token=token)
 
-        messages = fetch_history(read_client, channel_id, limit=50)
-        history_text = format_history_for_llm(messages, app_id_to_name)
+        history_text = format_history_for_llm(cached_messages, app_id_to_name)
 
         incentivize_secrets = random.random() < SECRET_SHARE_PROBABILITY
         text = generate_message(
@@ -231,7 +233,12 @@ def seed_channel(channel_name: str) -> int:
             continue
 
         try:
-            post_client.chat_postMessage(channel=channel_id, text=text)
+            resp = post_client.chat_postMessage(channel=channel_id, text=text)
+            cached_messages.append({
+                "ts": resp.get("ts", ""),
+                "text": text,
+                "app_id": config[persona]["app_id"],
+            })
             print(f"  [{i+1}] {persona}: {text[:60]}{'...' if len(text) > 60 else ''}")
         except Exception as e:
             print(f"  [{i+1}] {persona}: ERROR {e}")
